@@ -19,6 +19,7 @@ The evaluation must distinguish **rubric passes** from **independently verified 
 - [Human audit guide](docs/human-labeling-v1.md)
 - [Subject specification](subjects/cmto_v1.yaml)
 - [Source inventory](subjects/sources/cmto_sources_v1.yaml)
+- [Consent and boundaries development pack](docs/cmto-development-pack.md): captured source provenance, ten draft rubric checks, and a proposed 20-item first slice; extraction review and calibration still pending.
 
 The YAML files are complementary, not copies: the subject specification owns scope, format, quality criteria, and pilot allocation; the inventory owns source provenance and freezing. Their filenames now distinguish those roles. Application code remains domain-neutral.
 

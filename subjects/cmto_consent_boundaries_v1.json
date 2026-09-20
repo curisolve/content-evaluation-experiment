@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "cmto_consent_boundaries_v1",
+  "version": "1.0.0-development.1",
+  "parent_subject": "cmto_v1",
+  "status": "development_scope_agreed",
+  "source_pack": "sources/cmto_consent_boundaries.capture.json",
+  "rubric": "../rubrics/cmto_consent_boundaries_v1.json",
+  "format": "four_option_single_best_answer_mcq",
+  "topics": ["consent", "boundaries"],
+  "audiences": ["rmt_student", "practising_rmt"],
+  "difficulty_definitions": {
+    "foundational": "Identify or apply one explicit requirement with all relevant facts provided.",
+    "applied": "Resolve an ordinary practice scenario by combining relevant conditions in the supplied requirements; no outside clinical or legal knowledge."
+  },
+  "constraints": [
+    "Capable adult patient; ordinary non-sensitive-area treatment; no legal disputes.",
+    "Use full relevant source context, including exceptions and adjacent clauses.",
+    "State source-applicability facts explicitly; do not invent clinical indications.",
+    "Original synthetic scenarios only; no patient records or existing exam content."
+  ],
+  "excluded": [
+    "Capacity disputes, substitute decision-making, minors and impairing substances",
+    "Sensitive-area treatment/exposure, childbirth and clinical indications",
+    "Cannabis, product efficacy, diagnostic or external statutory claims",
+    "Gift-value thresholds and legal interpretation of dual relationships"
+  ],
+  "development_batch": {
+    "total": 20,
+    "ordinary": 12,
+    "single_defect_mutations": 4,
+    "semantic_duplicate_variants": 4,
+    "topic_marginals": {"consent": 10, "boundaries": 10},
+    "audience_marginals": {"rmt_student": 10, "practising_rmt": 10},
+    "difficulty_marginals": {"foundational": 10, "applied": 10},
+    "lineage": "Select four of the ordinary items as parents; derive one defect and one paraphrase from each. Keep each family together.",
+    "human_audit": "Label all 20 once; independently double-label five stratified items. Review semantic similarity separately.",
+    "reporting": "Ordinary yield, defect detection and duplicate handling are separate populations; not a held-out benchmark."
+  },
+  "release_gates": [
+    "All source artifacts match the committed capture hashes",
+    "Requirement context extraction and source linkage reviewed",
+    "No unresolved cross-reference is needed for a scenario",
+    "Generator and evaluator requests use identical frozen authority",
+    "Record exact models and budgets before paid generation"
+  ]
+}

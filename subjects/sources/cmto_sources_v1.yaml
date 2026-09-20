@@ -2,6 +2,8 @@ schema_version: 1
 id: cmto_sources_v1
 version: 1.0.0-draft.1
 status: inventoried_not_frozen
+development_capture: cmto_consent_boundaries.capture.json
+development_capture_note: The scoped consent/boundaries pack records September 8, 2026 applicability evidence and captured hashes. This broader inventory is not itself frozen; its original null provenance fields are superseded only for that scoped pack.
 reviewed_on: "2026-09-19"
 index_url: https://www.cmto.com/rmts/standards-of-practice-and-code-of-ethics/
 date_caveat: Page approval/update dates are not assumed effective dates. The linked introductory PDF describes the 2022 rollout and does not establish applicability of September 2026 changes.

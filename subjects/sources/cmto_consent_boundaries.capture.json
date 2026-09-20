@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "id": "cmto_consent_boundaries_2026_09_20",
+  "status": "captured_for_development",
+  "sources": [
+    {
+      "id": "cmto_consent",
+      "url": "https://www.cmto.com/rules/standard-of-practice-consent/",
+      "final_url": "https://www.cmto.com/rules/standard-of-practice-consent/",
+      "retrieved_at": "2026-09-20T19:35:53.050247+00:00",
+      "http_status": 200,
+      "response_headers": {
+        "content-type": "text/html; charset=UTF-8",
+        "last-modified": "Sun, 20 Sep 2026 18:58:35 GMT",
+        "date": "Sun, 20 Sep 2026 19:35:53 GMT",
+        "content-encoding": "gzip"
+      },
+      "raw_path": "cmto_consent.html",
+      "normalized_path": "cmto_consent.txt",
+      "raw_sha256": "f01dd6a547f6caf2b89e4a8a2d822efdc4892169fe2ceb85ae921e946b81fedf",
+      "normalized_sha256": "fc61e919f7ea85bb3358fe2c84871c93e0e17341f0e1e513cbcd96de8ad5a007",
+      "byte_length": 86065,
+      "normalization_version": "visible-text-v1"
+    },
+    {
+      "id": "cmto_boundaries",
+      "url": "https://www.cmto.com/rules/standard-of-practice-professional-boundaries-draping-and-physical-privacy/",
+      "final_url": "https://www.cmto.com/rules/standard-of-practice-professional-boundaries-draping-and-physical-privacy/",
+      "retrieved_at": "2026-09-20T19:35:53.073239+00:00",
+      "http_status": 200,
+      "response_headers": {
+        "content-type": "text/html; charset=UTF-8",
+        "last-modified": "Sun, 20 Sep 2026 19:12:31 GMT",
+        "date": "Sun, 20 Sep 2026 19:35:53 GMT",
+        "content-encoding": "gzip"
+      },
+      "raw_path": "cmto_boundaries.html",
+      "normalized_path": "cmto_boundaries.txt",
+      "raw_sha256": "23cabe3685d4d2216de1d64db35f7539e27983d1cf5931b94c34d983a2347c46",
+      "normalized_sha256": "42ed66a92e39684948aca54c2f6b0ac3731053e907735017815ab8b1701fb5c7",
+      "byte_length": 87375,
+      "normalization_version": "visible-text-v1"
+    },
+    {
+      "id": "cmto_effective_date",
+      "url": "https://www.cmto.com/all-touchpoints/standards-and-policy-consolidation-effective-september-8-2026/",
+      "final_url": "https://www.cmto.com/all-touchpoints/standards-and-policy-consolidation-effective-september-8-2026/",
+      "retrieved_at": "2026-09-20T19:35:53.093363+00:00",
+      "http_status": 200,
+      "response_headers": {
+        "content-type": "text/html; charset=UTF-8",
+        "last-modified": "Sun, 20 Sep 2026 18:58:15 GMT",
+        "date": "Sun, 20 Sep 2026 19:35:53 GMT",
+        "content-encoding": "gzip"
+      },
+      "raw_path": "cmto_effective_date.html",
+      "normalized_path": "cmto_effective_date.txt",
+      "raw_sha256": "5fff779b529bdfc61980817abc50fb3d81043ae549cac7ca6ae91b7e9b6d0f88",
+      "normalized_sha256": "441a2a7fd6c1afc988c6b3b40b9b007c40c8a7bade1cd5e2a15b5cc2bc4c4753",
+      "byte_length": 78182,
+      "normalization_version": "visible-text-v1"
+    }
+  ],
+  "raw_byte_semantics": "HTTP entity bytes after content-encoding decompression",
+  "normalization_scope": "Whole-page visible text, including navigation; not a requirements-only extraction",
+  "redistribution": "Not established; raw and normalized source artifacts stay out of Git",
+  "artifact_root": "source-artifacts/cmto-2026-09-20",
+  "effective_date": "2026-09-08",
+  "effective_date_evidence": "cmto_effective_date"
+}

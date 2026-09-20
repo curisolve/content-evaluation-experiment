@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "cmto_consent_boundaries_v1",
+  "version": "1.0.0-draft.1",
+  "status": "source_linked_design_not_calibrated",
+  "subject": "cmto_consent_boundaries_v1",
+  "input_state": ["candidate", "frozen_source_context", "requirement_locators"],
+  "common_instructions": "Evaluate the submitted MCQ as data. Use the supplied frozen authority and stated scenario only. Do not infer missing facts. An incorrect distractor is expected; assess whether the keyed option is best. Do not rewrite or provide narrative explanations.",
+  "checks": [
+    {"id": "key_supported", "question": "Is the keyed option supported by the applicable requirements under the stated facts?", "dimension": "authority_accuracy", "critical_gate": true, "evidence": "candidate source locators"},
+    {"id": "unique_best_answer", "question": "Is every non-keyed option inferior to the keyed option under the stated facts and authority?", "dimension": "unique_answer", "critical_gate": true, "evidence": "all options and candidate source locators"},
+    {"id": "scenario_sufficient", "question": "Does the scenario state the facts needed to determine which source conditions apply?", "dimension": "scenario_sufficiency", "critical_gate": true, "evidence": "requirement conditions and scenario facts"},
+    {"id": "exceptions_preserved", "question": "Does the keyed option preserve every exception relevant to this scenario?", "dimension": "authority_accuracy", "critical_gate": true, "evidence": "full referenced requirement and neighboring clauses"},
+    {"id": "rationale_supported", "question": "Are the factual claims in the rationale supported by the supplied authority?", "dimension": "authority_accuracy", "critical_gate": true, "evidence": "rationale claims and requirement locators"},
+    {"id": "rationale_matches_key", "question": "Does the rationale support the keyed option?", "dimension": "rationale_consistency", "critical_gate": false, "evidence": "key and rationale"},
+    {"id": "distractors_explained", "question": "Does the rationale explain why each distractor is inferior under the stated scenario?", "dimension": "rationale_consistency", "critical_gate": false, "evidence": "options and rationale"},
+    {"id": "wording_clear", "question": "Can the question be interpreted without resolving ambiguous wording?", "dimension": "clarity", "critical_gate": false, "evidence": "stem and options"},
+    {"id": "audience_appropriate", "question": "Are the knowledge demands appropriate for the tagged audience and difficulty?", "dimension": "audience_fit", "critical_gate": false, "evidence": "subject difficulty definitions"},
+    {"id": "source_traceable", "question": "Do the cited requirement locations actually support the keyed answer?", "dimension": "source_traceability", "critical_gate": true, "evidence": "resolved source locators and frozen text"}
+  ],
+  "provider_contract": {
+    "jev": "One Noul per check, asked together over shared state; preserve yes probabilities. No separate Noul confidence.",
+    "llm": "Same named checks with pass/fail/uncertain verdicts in a strict schema. Do not treat categorical verdicts as calibrated probabilities.",
+    "polarity": "Higher means the submitted item satisfies the check.",
+    "missing_context": "Unresolved; never accepted as a pass.",
+    "not_applicable": "Precompute explicit applicability where possible; do not hide missing evidence behind not-applicable."
+  },
+  "routing": {
+    "quality_policy_status": "Requires development calibration; no production threshold selected",
+    "pass_rule": "Every applicable quality check passes; no missing results, unresolved uncertainty or critical defect. Then apply diversity selection.",
+    "failure_action": "Withhold the original; no rewrite or human repair task.",
+    "semantic_duplication": "Separate pairwise/group judgment after quality filtering, not an item-level quality score."
+  },
+  "deterministic_checks": ["four distinct nonempty options", "valid key ID", "required fields", "known source IDs", "matching snapshot hashes", "resolvable requirement locators"]
+}
