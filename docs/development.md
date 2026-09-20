@@ -6,6 +6,11 @@ Opt-in [real-provider smoke adapters](providers.md) are also available. They use
 
 Use a development worktree, not the synchronized `worksync` checkout.
 
+The [CMTO development collector](cmto-run.md) adds source-grounded generation and
+evaluation with explicit execution, call/spend admission guards, and separate
+generator accounting. Its interruption behavior is intentionally different:
+inspection/replay only, no paid resume yet.
+
 ## Setup and run
 
 ```bash
@@ -48,7 +53,7 @@ Pydantic contracts keep candidates, policies, usage, rates and evaluation result
 
 Still required before a meaningful pilot:
 
-- Approved/frozen CMTO sources; configuration-driven generation and atomic rubric; live verification of real adapters and recorded-response fixtures. Current tests use constructed response fixtures, not recorded live results.
+- Independent CMTO source review and live validation of the scoped collector; recorded-response fixtures. Source extraction, configuration-driven generation and atomic rubric wiring now exist, but their tests use constructed responses, not live CMTO results.
 - Semantic redundancy selection, audited duplicate decisions and coverage quotas. Current selection uses exact normalized stem/options fingerprints plus a count target; it does not establish semantic variety.
 - Blinded audit packets, label import/adjudication, cohort-separated quality metrics and uncertainty intervals. Approval export is not a blinded audit export.
 - Deadline/spend caps, per-provider concurrency/rate limits, real backoff, standalone-arm elapsed-time measurement and time-to-target reporting. Fake arms are interleaved; their latencies are not real-provider benchmarks.

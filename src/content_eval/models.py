@@ -158,14 +158,14 @@ class Policy(Frozen):
 
 class Manifest(Frozen):
     version: Literal[1] = 1
-    mode: Literal["fake-demo", "live-smoke"] = "fake-demo"
+    mode: Literal["fake-demo", "live-smoke", "cmto-development"] = "fake-demo"
     provider_config: dict[str, JsonValue] = Field(default_factory=dict)
     seed: int = 7
     count: int = Field(default=12, ge=1, le=1000)
     target: int = Field(default=5, ge=1, le=1000)
     max_attempts: int = Field(default=2, ge=1, le=5)
     failure_mode: Literal["none", "transient", "unavailable"] = "none"
-    generator_version: Literal["demo-generator-v1"] = "demo-generator-v1"
+    generator_version: Literal["demo-generator-v1", "cmto-generator-v1"] = "demo-generator-v1"
     selector_version: Literal["exact-text-v1"] = "exact-text-v1"
     source_text: str = "Demo only: addition of nonnegative integers; no CMTO authority."
     policy: Policy = Field(default_factory=Policy)
@@ -186,6 +186,11 @@ class Manifest(Frozen):
     def check_rates(self) -> Self:
         if set(self.rates) != set(ARMS):
             raise ValueError("both arms need frozen rate cards")
+        if self.mode == "cmto-development":
+            if self.count != 20 or self.max_attempts != 1:
+                raise ValueError("CMTO development requires 20 items and one attempt per arm")
+            if self.generator_version != "cmto-generator-v1" or not self.provider_config:
+                raise ValueError("CMTO configuration required")
         if self.mode == "live-smoke":
             if self.count > 5 or self.max_attempts != 1:
                 raise ValueError(
@@ -216,6 +221,13 @@ EventType = Literal[
     "decision.recorded",
     "selection.recorded",
     "export.completed",
+    "generation.started",
+    "generation.succeeded",
+    "generation.failed",
+    "candidate.constructed",
+    "candidate.prepared",
+    "pool.frozen",
+    "budget.checked",
 ]
 
 

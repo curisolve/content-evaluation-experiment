@@ -1,6 +1,6 @@
 # Content evaluation experiment
 
-Status: runnable offline CLI plus real-provider smoke adapters, September 20, 2026. User-run smoke tests succeeded for JEV, Opus 5, and the configured OpenAI model; CMTO source approval and pilot calibration remain pending.
+Status: offline CLI, live smoke adapters, and an opt-in CMTO development collector, September 20, 2026. User-run smoke tests succeeded for JEV, Opus 5, and the configured OpenAI model. The CMTO collector has mocked integration coverage; source review, live CMTO validation, and pilot calibration remain pending.
 
 How quickly and cheaply can we identify enough high-quality, varied MCQs to send for final human approval?
 
@@ -12,6 +12,7 @@ The evaluation must distinguish **rubric passes** from **independently verified 
 
 - [Run the offline CLI and development checks](docs/development.md)
 - [Configure JEV, Opus 5, and GPT-5.6 API access](docs/providers.md)
+- [Review sources and run the bounded CMTO development collection](docs/cmto-run.md)
 
 - [Engineering design](design.md)
 - [Architecture and flow](docs/architecture.md), with an editable [Excalidraw diagram](docs/architecture.excalidraw)
@@ -92,7 +93,8 @@ The foundation uses Python >=3.14, `uv`, Pydantic v2, Typer, SQLite, pytest, ruf
 | Simplified experiment and event contract | Captured, including diagrams, token/cost accounting, and replay requirements; the initial implementation follows a documented subset |
 | CLI, storage, fake filters, event replay | Initial slice implemented: `src/content_eval/`, `tests/test_foundation.py`, locked dependencies and CI. See [development guide](docs/development.md) for commands and remaining contract work. |
 | Real-provider adapters and usage accounting | Implemented with 42 passing tests and successful user-run live smoke tests for both pairings; see [verification evidence](docs/live-smoke-verification.md). Smoke commands preview unless explicitly executed. |
-| Source freeze, rubric, real adapters, diversity selector | Pending; resolve source effective dates and snapshots before generation |
+| Scoped CMTO development collection | Implemented: verified local source extraction, configurable rubric, bounded generation/evaluation, and separate generation accounting. Explicit reviewed pack hash required; no live CMTO evidence yet. |
+| Calibration and diversity selector | Pending: independent audit, semantic deduplication, and validated selection policy |
 | Development pilot and blinded audit | Pending; proposed 60 inputs plus 15 independent second reviews |
 | Frozen held-out evaluation and report | Pending; set sample size, targets, budgets, and quality gates from pilot evidence |
 | Live TUI and animated replay | Follow-on; journal/replay compatibility required from the first milestone |

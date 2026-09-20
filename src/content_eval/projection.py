@@ -30,6 +30,9 @@ def project(events: list[Event]) -> dict[str, Any]:
         "warning": (
             "Synthetic judgments, tokens and prices; no quality or savings evidence."
             if manifest.mode == "fake-demo"
+            else "CMTO development only: uncalibrated rubric, exact-only deduplication, "
+            "mixed ordinary/challenge pool; no approval or verified-quality claim."
+            if manifest.mode == "cmto-development"
             else "Live API smoke test; synthetic arithmetic, not CMTO quality or savings evidence."
         ),
         "manifest_hash": events[0].payload["manifest_hash"],
@@ -65,9 +68,25 @@ def project(events: list[Event]) -> dict[str, Any]:
             "unknown_reasoning_attempts": 0,
         }
     outstanding: set[str] = set()
+    generation: dict[str, Any] = {
+        "attempts": 0,
+        "failures": 0,
+        "unknown_cost_attempts": 0,
+        "estimated_cost_usd": Decimal(0),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 0,
+        "unknown_reasoning_attempts": 0,
+    }
+    pool_size = 0
+    prepared = 0
     sessions: dict[str, tuple[int, int]] = {}
     for event in events:
         p = event.payload
+        if event.event_type == "candidate.prepared":
+            prepared += 1
         if event.event_type != "export.completed":
             start, _ = sessions.get(event.session_id, (event.elapsed_ns, event.elapsed_ns))
             sessions[event.session_id] = (start, event.elapsed_ns)
@@ -79,8 +98,38 @@ def project(events: list[Event]) -> dict[str, Any]:
             report["invalid"] += 1
         elif event.event_type in {"run.completed", "run.cancelled", "run.failed"}:
             report["status"] = event.event_type.split(".")[1]
+            report["stop_reason"] = p.get("reason")
         elif event.event_type == "run.resumed":
             report["status"] = "running"
+        if event.event_type == "pool.frozen":
+            inputs = p["inputs"]
+            if not isinstance(inputs, list) or [digest(i) for i in inputs] != p["input_hashes"]:
+                raise ValueError("frozen pool hash mismatch")
+            pool_size = len(inputs)
+        if event.event_type == "generation.started":
+            generation["attempts"] += 1
+            if event.attempt_id is None or event.attempt_id in outstanding:
+                raise ValueError("generation requires unique attempt ID")
+            outstanding.add(event.attempt_id)
+        elif event.event_type in {"generation.succeeded", "generation.failed"}:
+            if event.attempt_id not in outstanding:
+                raise ValueError("generation terminal without unique intent")
+            outstanding.remove(event.attempt_id)
+            generation["failures"] += event.event_type == "generation.failed"
+            if p.get("cost_usd") is None:
+                generation["unknown_cost_attempts"] += 1
+            else:
+                generation["estimated_cost_usd"] += Decimal(str(p["cost_usd"]))
+            if p.get("usage") is not None:
+                usage = Usage.model_validate(p["usage"])
+                generation["input_tokens"] += usage.input_total
+                generation["output_tokens"] += usage.output
+                generation["cache_read_tokens"] += usage.cache_read
+                generation["cache_write_tokens"] += usage.cache_write + usage.cache_write_1h
+                if usage.reasoning is None:
+                    generation["unknown_reasoning_attempts"] += 1
+                else:
+                    generation["reasoning_tokens"] += usage.reasoning
         if event.arm is None:
             continue
         stats = report["arms"][event.arm]
@@ -157,4 +206,51 @@ def project(events: list[Event]) -> dict[str, Any]:
             )
         stats["target_reached"] = count >= manifest.target
         stats["target_gap"] = max(0, manifest.target - count)
+    if manifest.mode == "cmto-development":
+        report["collection_complete"] = report.get("stop_reason") == "fixed_pool_exhausted"
+        cfg = manifest.provider_config
+        assignments = cfg.get("slots", [])
+        if not isinstance(assignments, list):
+            raise ValueError("missing development assignments")
+        kinds = {
+            str(slot["id"]): str(slot["kind"]) for slot in assignments if isinstance(slot, dict)
+        }
+        for arm, stats in report["arms"].items():
+            populations = {}
+            for kind in ("ordinary", "defect", "paraphrase"):
+                own = [
+                    e for e in events if e.arm == arm and kinds.get(e.candidate_id or "") == kind
+                ]
+                decisions = [e for e in own if e.event_type == "decision.recorded"]
+                populations[kind] = {
+                    "attempts": sum(e.event_type == "attempt.started" for e in own),
+                    "quality_passes": sum(e.payload["decision"] == "pass" for e in decisions),
+                    "withheld": sum(e.payload["decision"] == "withhold" for e in decisions),
+                    "unresolved": sum(e.payload["decision"] == "unresolved" for e in decisions),
+                    "provisionally_selected": sum(
+                        e.event_type == "selection.recorded" and e.payload["reason"] == "selected"
+                        for e in own
+                    ),
+                }
+            stats["populations"] = populations
+        generation["cost_complete"] = not generation["unknown_cost_attempts"] and not outstanding
+        generation["estimated_cost_usd"] = str(generation["estimated_cost_usd"])
+        report["generation"] = generation
+        report["frozen_pool_size"] = pool_size
+        report["prepared_candidates"] = prepared
+        report["experiment_estimated_cost_usd"] = str(
+            Decimal(generation["estimated_cost_usd"])
+            + sum(
+                (Decimal(stats["estimated_cost_usd"]) for stats in report["arms"].values()),
+                Decimal(0),
+            )
+        )
+        report["experiment_cost_complete"] = generation["cost_complete"] and all(
+            stats["cost_complete"] for stats in report["arms"].values()
+        )
+        report["cost_note"] = (
+            "Experiment total counts shared generation once. Arm costs are evaluation-only. "
+            "All-item ratios mix ordinary/challenge populations and are not operational yield. "
+            "Admission spend guard is estimated, not a provider billing limit."
+        )
     return report

@@ -2,16 +2,20 @@
 
 import json
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated
 
 import httpx
 import typer
 
+from content_eval.cmto import execute as execute_cmto
+from content_eval.cmto import make_manifest
 from content_eval.live import LiveConfig, LiveEvaluator, credential_status, smoke_manifest
 from content_eval.models import Arm, Event, Manifest, canonical, digest
 from content_eval.projection import project
 from content_eval.providers import Evaluator
+from content_eval.sources import load_pack
 from content_eval.storage import Store
 from content_eval.workflow import run
 
@@ -28,6 +32,95 @@ def emit(value: object) -> None:
 def check_providers() -> None:
     """Report credential presence only; no network calls or secret values."""
     emit({"credentials_present": credential_status(), "network_calls": 0})
+
+
+@app.command("cmto-pack")
+def cmto_pack(
+    subject: Path = Path("subjects/cmto_consent_boundaries_v1.json"),
+    artifacts: Path = Path("source-artifacts/cmto-2026-09-20"),
+    output: Path | None = None,
+) -> None:
+    """Verify and extract local authority; optional output is a local review artifact."""
+    try:
+        pack = load_pack(subject, artifacts)
+        if output is not None:
+            with output.open("x") as stream:
+                stream.write(canonical(pack) + "\n")
+        emit(
+            {
+                "pack_hash": pack["pack_hash"],
+                "review_status": pack["review_status"],
+                "requirements": {
+                    key: len(value["requirements"]) for key, value in pack["articles"].items()
+                },
+                "output": str(output) if output else None,
+                "network_calls": 0,
+            }
+        )
+    except (ValueError, OSError, KeyError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("cmto-run")
+def cmto_run(
+    max_estimated_usd: Annotated[str, typer.Option("--max-estimated-usd")],
+    llm: str = "anthropic",
+    model: str | None = None,
+    subject: Path = Path("subjects/cmto_consent_boundaries_v1.json"),
+    artifacts: Path = Path("source-artifacts/cmto-2026-09-20"),
+    reviewed_pack_hash: str | None = None,
+    max_calls: int = 56,
+    threshold: float = 0.9,
+    db: Database = Path("runs/cmto.sqlite"),
+    execute: bool = False,
+) -> None:
+    """Preview development collection. Execution needs explicit spend and reviewed pack hash."""
+    try:
+        pack = load_pack(subject, artifacts)
+        selected = model or (
+            "claude-opus-5" if llm == "anthropic" else os.environ.get("OPENAI_MODEL", "")
+        )
+        config = LiveConfig.model_validate(
+            {
+                "provider": llm,
+                "model": selected,
+                "max_output_tokens": 4096,
+            }
+        )
+        manifest = make_manifest(
+            pack,
+            config,
+            Decimal(max_estimated_usd),
+            max_calls=max_calls,
+            threshold=threshold,
+        )
+        if not execute:
+            emit(
+                {
+                    "mode": manifest.mode,
+                    "pack_hash": pack["pack_hash"],
+                    "manifest_hash": digest(manifest.model_dump(mode="json")),
+                    "generator_and_llm": selected,
+                    "jev": "jev-1.13.0",
+                    "items": 20,
+                    "maximum_calls": max_calls,
+                    "estimated_spend_guard_usd": max_estimated_usd,
+                    "network_calls": 0,
+                    "threshold_status": "provisional_not_calibrated",
+                    "execution_requires": "--execute and --reviewed-pack-hash matching this pack",
+                    "warning": "Development only; spend admission estimates are not billed caps.",
+                }
+            )
+            return
+        if reviewed_pack_hash != pack["pack_hash"]:
+            raise ValueError(
+                "review the cmto-pack output and supply its exact --reviewed-pack-hash"
+            )
+        with httpx.Client(trust_env=False, follow_redirects=False) as client, Store(db) as store:
+            run_id = execute_cmto(store, manifest, client)
+            emit(project(store.events(run_id)))
+    except (ValueError, OSError, KeyError, InvalidOperation) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def execute_live(manifest: Manifest, db: Path, run_id: str | None = None) -> None:
@@ -211,6 +304,10 @@ def export_approval(
     with Store(db) as store, store.writer():
         events = store.events(run_id)
         summary = project(events)
+        if summary["mode"] == "cmto-development":
+            raise typer.BadParameter(
+                "CMTO development items cannot be exported as an approval queue"
+            )
         selected = summary["arms"][arm]["selected"]
         candidates = [
             e.payload["candidate"]

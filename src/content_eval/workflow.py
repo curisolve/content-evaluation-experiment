@@ -20,6 +20,8 @@ def run(
     evaluators: dict[Arm, Evaluator] | None = None,
 ) -> str:
     with store.writer():
+        if manifest is not None and manifest.mode == "cmto-development":
+            raise ValueError("use the dedicated CMTO development coordinator")
         run_id = run_id or str(uuid4())
         events = store.events(run_id)
         if events:
@@ -28,6 +30,8 @@ def run(
             if manifest is not None and frozen != manifest:
                 raise ValueError("resume manifest differs from the frozen run")
             manifest = frozen
+            if manifest.mode == "cmto-development":
+                raise ValueError("CMTO resume is inspection-only; paid attempts are never repeated")
             if report["status"] == "completed":
                 return run_id
             if manifest.mode == "live-smoke" and evaluators is None:
@@ -98,11 +102,12 @@ def _process(
                 attempt_id=event.attempt_id,
             )
     generated = {e.candidate_id for e in events if e.event_type == "candidate.generated"}
-    inputs = events[0].payload["inputs"]
-    if (
-        not isinstance(inputs, list)
-        or [digest(item) for item in inputs] != events[0].payload["input_hashes"]
-    ):
+    pool = next(
+        (e.payload for e in reversed(events) if e.event_type == "pool.frozen"),
+        events[0].payload,
+    )
+    inputs = pool["inputs"]
+    if not isinstance(inputs, list) or [digest(item) for item in inputs] != pool["input_hashes"]:
         raise ValueError("frozen input pool hash mismatch")
     for raw in inputs:
         if not isinstance(raw, dict):
@@ -123,13 +128,21 @@ def _process(
             continue
         try:
             candidate = Candidate.model_validate(raw)
-        except ValidationError as exc:
+            if manifest.mode == "cmto-development":
+                from content_eval.cmto import validate_candidate
+
+                validate_candidate(candidate, manifest)
+        except (ValidationError, ValueError) as exc:
             store.append(
                 run_id,
                 "candidate.invalid",
                 {
                     "reason": "schema_validation",
-                    "errors": json.loads(exc.json(include_input=False, include_context=False)),
+                    "errors": (
+                        json.loads(exc.json(include_input=False, include_context=False))
+                        if isinstance(exc, ValidationError)
+                        else str(exc)
+                    ),
                 },
                 candidate_id=cid,
             )

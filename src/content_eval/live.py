@@ -185,11 +185,44 @@ def normalize_usage(provider: Provider, raw: Any) -> Usage | None:
         return None
 
 
+class Completion(Frozen):
+    model: str
+    usage: Usage | None
+    request_id: str | None
+    raw_response: dict[str, Any]
+    pricing_applicable: bool
+
+
 class LiveEvaluator:
-    def __init__(self, config: LiveConfig, client: httpx.Client) -> None:
+    def __init__(
+        self,
+        config: LiveConfig,
+        client: httpx.Client,
+        *,
+        source: Any = SOURCE,
+        questions: dict[str, str] | None = None,
+        instructions: str = INSTRUCTIONS,
+        max_input_bytes: int = 16_000,
+        uncertainty_threshold: float = 0.9,
+    ) -> None:
         self.config = config
         self.model = config.model
         self.client = client
+        self.source = source
+        self.questions = dict(QUESTIONS if questions is None else questions)
+        self.instructions = instructions
+        self.jev_instructions = instructions + " " if questions is not None else ""
+        self.max_input_bytes = max_input_bytes
+        self.uncertainty_threshold = uncertainty_threshold
+        self.schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                key: {"type": "string", "enum": ["pass", "fail", "uncertain"]}
+                for key in self.questions
+            },
+            "required": list(self.questions),
+        }
         self._api_key = os.environ.get(KEY_NAMES[config.provider], "").strip()
         if not self._api_key:
             raise ValueError(f"missing {KEY_NAMES[config.provider]}")
@@ -198,21 +231,30 @@ class LiveEvaluator:
     def request_body(self, candidate: Candidate) -> dict[str, Any]:
         state = {
             "candidate": candidate.model_dump(mode="json", exclude={"id", "family_id", "cohort"}),
-            "source": SOURCE,
+            "source": self.source,
         }
         if self.config.provider == "jev":
             return {
                 "model": self.model,
                 "state": state,
                 "questions": {
-                    key: {"type": "noul", "instructions": value} for key, value in QUESTIONS.items()
+                    key: {"type": "noul", "instructions": self.jev_instructions + value}
+                    for key, value in self.questions.items()
                 },
             }
-        content = canonical({"state": state, "checks": QUESTIONS})
+        content = canonical({"state": state, "checks": self.questions})
+        return self.structured_body(content, self.instructions, self.schema)
+
+    def structured_body(
+        self,
+        content: str,
+        instructions: str,
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
         if self.config.provider == "openai":
             return {
                 "model": self.model,
-                "instructions": INSTRUCTIONS,
+                "instructions": instructions,
                 "input": content,
                 "max_output_tokens": self.config.max_output_tokens,
                 "store": False,
@@ -222,22 +264,36 @@ class LiveEvaluator:
                         "type": "json_schema",
                         "name": "rubric_verdicts",
                         "strict": True,
-                        "schema": SCHEMA,
+                        "schema": schema,
                     }
                 },
             }
         return {
             "model": self.model,
-            "system": INSTRUCTIONS,
+            "system": instructions,
             "max_tokens": self.config.max_output_tokens,
             "messages": [{"role": "user", "content": content}],
-            "output_config": {"format": {"type": "json_schema", "schema": SCHEMA}},
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
         }
 
     def evaluate(self, candidate: Candidate, attempt: int) -> ProviderResult:
+        result = self.complete(self.request_body(candidate))
+        try:
+            evaluation = self._evaluation(result.raw_response)
+        except KeyError, ValueError, TypeError, AttributeError, ValidationError:
+            raise ProviderError(
+                "invalid_evaluation",
+                usage=result.usage,
+                returned_model=result.model,
+                request_id=result.request_id,
+                raw_response=result.raw_response,
+                pricing_applicable=result.pricing_applicable,
+            ) from None
+        return ProviderResult(evaluation=evaluation, **result.model_dump())
+
+    def complete(self, payload: dict[str, Any]) -> Completion:
         provider = self.config.provider
-        payload = self.request_body(candidate)
-        if len(canonical(payload).encode()) > 16_000:
+        if len(canonical(payload).encode()) > self.max_input_bytes:
             raise ProviderError("smoke_input_limit")
         headers = {"Content-Type": "application/json"}
         if provider == "anthropic":
@@ -291,7 +347,6 @@ class LiveEvaluator:
         try:
             if not model:
                 raise ValueError("missing returned model")
-            evaluation = self._evaluation(raw)
         except KeyError, ValueError, TypeError, AttributeError, ValidationError:
             # A refused/incomplete/malformed output can still be billed.
             raise ProviderError(
@@ -302,9 +357,8 @@ class LiveEvaluator:
                 raw_response=raw,
                 pricing_applicable=priced,
             ) from None
-        return ProviderResult(
+        return Completion(
             model=model,
-            evaluation=evaluation,
             usage=usage,
             request_id=request_id,
             raw_response=raw,
@@ -314,14 +368,34 @@ class LiveEvaluator:
     def _evaluation(self, raw: dict[str, Any]) -> Evaluation:
         if self.config.provider == "jev":
             answers = raw["answers"]
-            if set(answers) != set(QUESTIONS):
+            if set(answers) != set(self.questions):
                 raise ValueError("answer IDs do not match rubric")
             values = {}
             for key, answer in answers.items():
                 if answer["type"] != "noul" or type(answer["noul"]) not in (int, float):
                     raise ValueError("invalid Noul")
                 values[key] = answer["noul"]
-            return Evaluation(checks=values, uncertain=any(0.1 < v < 0.9 for v in values.values()))
+            return Evaluation(
+                checks=values,
+                uncertain=any(
+                    float(Decimal("1") - Decimal(str(self.uncertainty_threshold)))
+                    < v
+                    < self.uncertainty_threshold
+                    for v in values.values()
+                ),
+            )
+        verdicts = self.structured_output(raw)
+        if not isinstance(verdicts, dict) or set(verdicts) != set(self.questions):
+            raise ValueError("verdict IDs do not match rubric")
+        scores = {"pass": 1.0, "fail": 0.0, "uncertain": 0.5}
+        if any(not isinstance(v, str) or v not in scores for v in verdicts.values()):
+            raise ValueError("invalid verdict")
+        return Evaluation(
+            checks={k: scores[v] for k, v in verdicts.items()},
+            uncertain="uncertain" in verdicts.values(),
+        )
+
+    def structured_output(self, raw: dict[str, Any]) -> Any:
         if self.config.provider == "openai":
             if raw.get("status") != "completed":
                 raise ValueError("incomplete response")
@@ -340,9 +414,4 @@ class LiveEvaluator:
             texts = [part["text"] for part in raw["content"] if part.get("type") == "text"]
         if len(texts) != 1:
             raise ValueError("one structured answer required")
-        verdicts = Verdicts.model_validate_json(texts[0]).model_dump()
-        scores = {"pass": 1.0, "fail": 0.0, "uncertain": 0.5}
-        return Evaluation(
-            checks={k: scores[v] for k, v in verdicts.items()},
-            uncertain="uncertain" in verdicts.values(),
-        )
+        return json.loads(texts[0])
