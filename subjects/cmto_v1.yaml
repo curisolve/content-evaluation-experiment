@@ -1,0 +1,84 @@
+schema_version: 1
+id: cmto_v1
+version: 1.0.0-draft.1
+status: pending_owner_review
+created_on: "2026-09-19"
+name: Applying Ontario CMTO professional standards
+jurisdiction: Ontario, Canada
+language: en-CA
+audiences: [rmt_student, practising_rmt]
+objective: Recognize and apply professional obligations in realistic practice scenarios.
+format:
+  type: single_best_answer_mcq
+  option_ids: [A, B, C, D]
+  required_fields: [stem, options, answer_key, rationale, source_references, learning_objective_id, audience, difficulty]
+  answer_count: 1
+  source_reference_fields: [source_id, requirement_locator, snapshot_hash]
+  rationale: Explain the keyed answer and why each distractor is not best under the stated facts.
+  constraints:
+    - Exactly four nonempty, distinct options and one valid keyed option.
+    - Exactly one defensible best answer under the supplied authority and scenario.
+    - Include all facts needed to apply a condition or exception.
+    - Avoid all-of-the-above, none-of-the-above, trick wording, and answer-length cues.
+    - Use synthetic scenarios; no real patient information or copied exam items.
+    - Do not represent these questions as official CMTO exam content.
+difficulty:
+  foundational: Recognize a directly stated requirement in a simple scenario.
+  applied: Apply a requirement with an explicit condition or exception.
+  integrated: Reconcile two included requirements using all necessary scenario facts.
+authority:
+  inventory: sources/cmto_v1.yaml
+  source_freeze_required_before_generation: true
+  rules:
+    - Give both arms identical source context for each original candidate.
+    - Supply relevant requirements and exceptions, not only the keyed-answer excerpt.
+    - Cite exact frozen requirement locations for key and rationale.
+    - An unresolved source conflict or effective date prevents use of that requirement.
+    - Guidance is interpretive context and must not be promoted to a mandatory rule.
+    - Do not infer detailed legal duties from a statute name or model memory.
+included_topics: [consent, privacy, records, boundaries, billing, conflicts, safety]
+excluded:
+  - Clinical diagnosis, treatment efficacy, anatomy testing, and unsupported clinical indications.
+  - Detailed statutory interpretation or external public-health guidance not in the approved source pack.
+  - Acupuncture and specialist modalities.
+  - Broad ethics dilemmas without a source-supported single best answer.
+  - Official exam alignment or certification claims.
+critical_risks:
+  - Teaching treatment without valid consent or despite withdrawal.
+  - Endorsing boundary violations or unsafe exposure or touch.
+  - Endorsing improper disclosure, access, or loss of protected information.
+  - Endorsing unsafe infection-control or practice conduct.
+  - Teaching falsification or misleading professional or financial records.
+dispositions:
+  acceptable: Correct, uniquely answerable, source-supported, clear, suitable for its audience, and usable without edits.
+  revisable: No critical defect; a bounded wording, distractor, citation, or explanation edit preserves the learning objective and correct key.
+  rejectable: A critical defect, wrong key, multiple or no defensible answers, unsupported central claim, or repair requiring a new question.
+  severity_rule: Ease of editing does not reduce severity; a one-character wrong key is still rejectable as submitted.
+  unresolved: A separate review status for insufficient authority or expertise; never silently accepted or assigned a negative score.
+pilot:
+  status: proposed_for_owner_review
+  original_count: 60
+  ordinary_generation_count: 40
+  challenge_count: 20
+  topic_counts: {consent: 12, privacy: 8, records: 8, boundaries: 8, billing: 8, conflicts: 8, safety: 8}
+  audience_counts: {rmt_student: 30, practising_rmt: 30}
+  difficulty_counts: {foundational: 20, applied: 30, integrated: 10}
+  notes:
+    - Counts are marginal coverage targets, not a full factorial design.
+    - Challenge items are included in the 60, not added afterward.
+    - Use ten source-grounded parents from the ordinary cohort, with two separately mutated variants each.
+    - Each variant attempts exactly one defect; humans verify whether that construction succeeded.
+    - Keep parents and all variants in one split and report ordinary and challenge cohorts separately.
+    - Balance answer positions within cohorts where feasible.
+    - Intended flaws and intended-good status are construction metadata, never ground truth.
+    - Pilot is development-only and is never reused as held-out evidence.
+  mutation_types: [wrong_key, missing_condition, competing_correct_option, unsupported_rationale, overgeneralized_rule]
+labeling_guide: ../docs/human-labeling-v1.md
+approval:
+  owner: null
+  approved_on: null
+  pending:
+    - Confirm subject boundaries, difficulty definitions, and disposition criteria.
+    - Confirm source applicability and complete source freezing.
+    - Confirm pilot allocation and availability of qualified reviewers.
+    - Set safety gates and main-study sample requirements after pilot evidence.

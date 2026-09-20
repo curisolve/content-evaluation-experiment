@@ -21,7 +21,7 @@ See [design.md](design.md) for engineering requirements. This README captures th
 
 The feasibility review found enough breadth for a pilot and likely several hundred meaningful questions. This is a planning estimate, not evidence that JEV works. The reviewed CMTO pages displayed September 8, 2026 updates; verify effective-date guidance before freezing sources. Give both evaluation arms equivalent authoritative context instead of relying on model memory.
 
-Next, formalize and approve `subjects/cmto_v1.yaml`, including concrete acceptable/revisable/rejectable criteria, before implementing the subject rubric. Keep subject-specific rules and prompts in configuration; application packages remain domain-neutral. Generate original synthetic scenarios, not copied question banks or real patient records.
+Review the draft [subject specification](subjects/cmto_v1.yaml), [source inventory](subjects/sources/cmto_v1.yaml), and [human-labeling guide](docs/human-labeling-v1.md) before rubric implementation. The source inventory is not yet frozen: effective dates and exact source snapshots/hashes remain to be resolved before generation. Keep subject-specific rules and prompts in configuration; application packages remain domain-neutral. Generate original synthetic scenarios, not copied question banks or real patient records.
 
 ## Agreed comparison and workflow
 
@@ -95,9 +95,10 @@ Update this table as work progresses, linking verification evidence or artifacts
 |---|---|---|
 | Review design and development configuration | Done | Requirements reviewed; worktree-only development confirmed. |
 | Assess subject and agree workflow | Done | CMTO/RMT MCQs selected; two-arm draft-first comparison recorded above. |
-| Establish repository and development worktree | Done | Local main initialized from existing project files; origin configured; `docs/experiment-plan` worktree created. Remote not yet pushed. |
+| Establish repository and development worktree | Done | Local main initialized from existing project files; origin configured; `docs/experiment-plan` worktree created. |
 | Capture plan | Done | README and aligned design; application remains unimplemented. |
-| Approve versioned subject and source inventory | Next | Define coverage, authority versions, difficulty, dispositions, risks, and labeling guide; owner reviews specification. |
+| Prepare versioned subject and source inventory | Done | Draft subject, seven-topic inventory, proposed 60-item coverage, and human-labeling guide linked above. |
+| Approve subject and freeze sources | Owner review / pending freeze | Confirm draft criteria and pilot allocation; resolve effective dates and capture source snapshots/hashes before generation. |
 | Scaffold CLI and quality checks | Pending | README usage, environment example, locked dependencies, lint/type checks, tests, and CI. |
 | Define contracts and append-only storage | Pending | Candidate revisions, runs, sources, arm lineage, drafts, labels, events, and manifests. |
 | Build fake-provider workflow | Pending | Both arms produce review exports; error/resume and deterministic replay checks pass. |
