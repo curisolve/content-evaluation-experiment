@@ -1,1 +1,2 @@
-typesafe-sdk
+# Prefer `uv sync --locked`; this installs the same local package without uv.
+-e .

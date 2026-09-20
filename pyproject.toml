@@ -1,7 +1,40 @@
 [project]
 name = "content-evaluation-experiment"
 version = "0.1.0"
+description = "Replayable, filter-first content evaluation experiments"
 requires-python = ">=3.14"
 dependencies = [
-    "typesafe-sdk>=0.7.0",
+    "pydantic>=2.11,<3",
+    "typer>=0.16,<1",
 ]
+
+[project.optional-dependencies]
+jev = ["typesafe-sdk>=0.7.0"]
+
+[project.scripts]
+content-eval = "content_eval.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/content_eval"]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.11", "mypy>=1.15"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

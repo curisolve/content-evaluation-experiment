@@ -1,6 +1,6 @@
 # Durable events and replay
 
-Status: required for first implementation; implementation pending.
+Status: target contract. The initial implementation supplies a SQLite event journal, hash-verified JSONL replay, attempt accounting, and resume; remaining work is listed in the [development guide](development.md). This document also specifies capabilities not yet implemented.
 
 Capture every application-observable operation, attempt, decision, and state transition from run creation through completion, cancellation, or failure. This includes generation, validation, both evaluator arms, quality routing, duplicate detection, coverage selection, exports, audits, and reporting. Provider-internal computation is not observable; token streaming is optional and cannot be required for correct replay.
 

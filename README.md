@@ -1,6 +1,6 @@
 # Content evaluation experiment
 
-Status: implementation-ready engineering plan, September 20, 2026; no runnable application yet. Subject/source approval and pilot calibration remain pending.
+Status: runnable offline CLI foundation, September 20, 2026. Real provider adapters, subject/source approval, and pilot calibration remain pending.
 
 How quickly and cheaply can we identify enough high-quality, varied MCQs to send for final human approval?
 
@@ -9,6 +9,8 @@ This standalone experiment compares a generative reviewer with JEV's typed atomi
 The evaluation must distinguish **rubric passes** from **independently verified quality**. A small blinded audit measures filter performance; it does not require approving or repairing the entire generated pool.
 
 ## Documents
+
+- [Run the offline CLI and development checks](docs/development.md)
 
 - [Engineering design](design.md)
 - [Architecture and flow](docs/architecture.md), with an editable [Excalidraw diagram](docs/architecture.excalidraw)
@@ -79,14 +81,14 @@ The first implementation provides the event journal, JSONL export, deterministic
 
 ## Boundaries and next steps
 
-Use Python, `uv`, Pydantic v2, Typer, SQLite, pytest, ruff, and a static type checker. Current metadata requires Python >=3.14 and `typesafe-sdk`; verify compatibility before locking provider/runtime versions. Use local provider protocols and fake adapters; default tests need no credentials. Generate synthetic scenarios only. Do not import another project's code, prompts, datasets, or history.
+The foundation uses Python >=3.14, `uv`, Pydantic v2, Typer, SQLite, pytest, ruff, and mypy. Dependencies are locked; `typesafe-sdk` is an optional `jev` extra reserved for the real adapter. Use local provider protocols and fake adapters; default tests need no credentials. Generate synthetic scenarios only. Do not import another project's code, prompts, datasets, or history.
 
 | Milestone | Status / next action |
 |---|---|
 | Project setup and original plan | Done; original draft-and-revise approach superseded by this filter-first proposal |
 | Subject and source inventory | Drafts available; owner review and source freeze pending |
-| Simplified experiment and event contract | Captured for implementation, including diagrams, token/cost accounting, and replay requirements; implementation not started |
-| CLI, storage, fake filters, event replay | Pending |
+| Simplified experiment and event contract | Captured, including diagrams, token/cost accounting, and replay requirements; the initial implementation follows a documented subset |
+| CLI, storage, fake filters, event replay | Initial slice implemented: `src/content_eval/`, `tests/test_foundation.py`, locked dependencies and CI. See [development guide](docs/development.md) for commands and remaining contract work. |
 | Source freeze, rubric, real adapters, diversity selector | Pending; resolve source effective dates and snapshots before generation |
 | Development pilot and blinded audit | Pending; proposed 60 inputs plus 15 independent second reviews |
 | Frozen held-out evaluation and report | Pending; set sample size, targets, budgets, and quality gates from pilot evidence |

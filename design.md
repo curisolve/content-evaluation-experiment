@@ -1,6 +1,6 @@
 # Filter-first evaluation design
 
-Status: engineering plan captured for implementation, September 20, 2026. No runnable implementation yet; subject/source approval and pilot calibration remain pending.
+Status: engineering plan with an initial offline CLI foundation, September 20, 2026. See [implementation scope](docs/development.md); real-provider work, subject/source approval and pilot calibration remain pending.
 
 The [README](README.md) owns scope and delivery tracking. This design supersedes the earlier review/rewrite/draft comparison. The objective is inexpensive, fast verification and selection of a varied pool for downstream human approval. Neither automated rewriting nor human repair is part of the experiment.
 
