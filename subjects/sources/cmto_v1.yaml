@@ -1,0 +1,135 @@
+schema_version: 1
+id: cmto_sources_v1
+version: 1.0.0-draft.1
+status: inventoried_not_frozen
+reviewed_on: "2026-09-19"
+index_url: https://www.cmto.com/rmts/standards-of-practice-and-code-of-ethics/
+date_caveat: Page approval/update dates are not assumed effective dates. The linked introductory PDF describes the 2022 rollout and does not establish applicability of September 2026 changes.
+freeze_requirements:
+  - Resolve effective dates and applicability for each included requirement with authoritative evidence.
+  - Retrieve and preserve exact source bytes in the experiment source bundle.
+  - Record retrieval timestamp, raw SHA-256, snapshot location, and response metadata.
+  - Extract and review requirement text with conditions, exceptions, and related definitions.
+  - Record normalized-text SHA-256, extraction version, and stable requirement IDs.
+  - Verify redistribution permissions before committing full source documents; retain retrievable artifact references where appropriate.
+  - Freeze the same source pack for generator, both evaluators, and human reviewers.
+  - Block generation against any source lacking required provenance or unresolved applicability.
+sources:
+  - id: cmto_consent
+    topic: consent
+    title: "Consent"
+    url: https://www.cmto.com/rules/standard-of-practice-consent/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.1, requirements.2, requirements.3-5, requirements.8-9]
+  - id: cmto_privacy
+    topic: privacy
+    title: "Privacy and Confidentiality"
+    url: https://www.cmto.com/rules/standard-of-practice-privacy-and-confidentiality/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.2-4, requirements.5-7, requirements.9]
+  - id: cmto_records
+    topic: records
+    title: "Record Keeping"
+    url: https://www.cmto.com/rules/standard-of-practice-record-keeping/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.4, requirements.7-10, requirements.11-15]
+  - id: cmto_boundaries
+    topic: boundaries
+    title: "Professional Boundaries, Draping, and Physical Privacy"
+    url: https://www.cmto.com/rules/standard-of-practice-professional-boundaries-draping-and-physical-privacy/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.1-8, requirements.9-13, requirements.14-19]
+  - id: cmto_billing
+    topic: billing
+    title: "Fees and Billing"
+    url: https://www.cmto.com/rules/standard-of-practice-fees-and-billing/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.1-11, requirements.12-13, requirements.14]
+  - id: cmto_conflicts
+    topic: conflicts
+    title: "Conflict of Interest"
+    url: https://www.cmto.com/rules/standard-of-practice-conflict-of-interest/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.1, requirements.2, requirements.3-4]
+  - id: cmto_safety
+    topic: safety
+    title: "Safety and Risk Management and Infection Prevention and Control"
+    url: https://www.cmto.com/rules/standard-of-practice-safety-and-risk-management-and-infection-prevention-and-control/
+    role: primary_requirement
+    observed_approval_date: "2026-09-08"
+    observed_update_date: "2026-09-08"
+    effective_date: null
+    effective_date_status: unresolved
+    reviewed_on: "2026-09-19"
+    snapshot_path: null
+    retrieved_at: null
+    raw_sha256: null
+    normalized_sha256: null
+    requirement_locators: [requirements.2-4, requirements.10-14, requirements.15]
+supporting_sources:
+  - id: cmto_about_standards
+    url: https://www.cmto.com/wp-content/uploads/2022/03/CMTO-Standards-of-Practice-2022-About-the-Standards-of-Practice-Mar-4-2022.pdf
+    role: historical_interpretive_context
+    observed_approval_date: "2021-02-09"
+    stated_implementation_date: "2022-01-01"
+    limitation: Does not resolve applicability of the 2026 standard-page updates.
+  - id: cmto_glossary
+    url: https://www.cmto.com/wp-content/uploads/2025/10/CMTO-SOP-Glossary.pdf
+    role: definitions_pending_compatibility_review
+    observed_update_date: "2025-09-30"
+    limitation: Verify definitions against the selected standard versions before inclusion.
+supporting_source_freeze_status: Not frozen; same provenance requirements apply if included.

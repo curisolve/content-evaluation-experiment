@@ -3,6 +3,8 @@
 Status: handoff and design guidelines  
 Date: 2026-09-19
 
+Agreed scope and delivery tracking are recorded in [README.md](README.md). The selected subject is CMTO professional standards for RMTs and RMT students, using MCQs. Formal subject specification approval remains a prerequisite for rubric implementation. The experiment now ends automated processing with internal draft creation, followed by human verification.
+
 ## Handoff
 
 Build this as a new, standalone Python project. It must not import, copy, migrate, or depend on files, code, schemas, prompts, content, or history from any existing project. The experiment creates its own generated examples, fixtures, labels, configuration, and database.
@@ -103,17 +105,17 @@ deterministic validation
         v
 JEV atomic evaluation --------> versioned routing policy
                                      | clean and confident
-                                     |---------------------> human review
+                                     |---------------------> internal draft -> human review
                                      |
                                      | weak or uncertain
                                      v
                           generative diagnosis/rewrite
                                      |
                                      v
-                                human review
+                           internal draft -> human review
 ```
 
-During the experiment, run JEV and the baseline generative reviewer in shadow mode. Neither may approve, publish, or perform external side effects. Only a human may assign the final benchmark label.
+Compare two isolated workflows on the same original candidates: a baseline that uses generative review for every valid MCQ, and a JEV workflow that selectively invokes the same generative reviewer. Both may apply policy-controlled revisions and create internal drafts before final human verification. In the CLI milestone, draft creation means database records and review exports, not external publication. Neither workflow may approve content for learners. Only a human may assign the final benchmark label. Preserve JEV results for a secondary evaluator-only analysis.
 
 ### 4. Domain contracts
 
@@ -145,12 +147,13 @@ Never overwrite an earlier run. Derive the current view by querying the latest a
 Use explicit workflow states:
 
 ```text
-generated -> validated -> shadow_evaluated -> awaiting_human
-          -> remediation_requested -> remediated -> awaiting_human
-          -> accepted | rejected
+generated -> validated -> evaluated -> draft -> awaiting_human
+evaluated -> remediation_requested -> remediated -> revalidated -> draft
+awaiting_human -> accepted | revision_required | rejected
 ```
 
 An evaluator failure is a visible state or event, never a low quality score.
+Structurally valid candidates with unresolved evaluation errors may become drafts needing attention. Unrepaired structural failures remain in an attention queue/export. Preserve each revision as a linked immutable candidate; draft labels apply to that version, not automatically to its original.
 
 ### 5. Rubric design
 
@@ -176,9 +179,9 @@ The policy should:
 1. Normalize evaluator outputs.
 2. Aggregate atomic checks into named display dimensions.
 3. Identify critical dimensions from the subject's documented risks.
-4. Route hard failures, uncertainty, and near-boundary results to generative diagnosis and then human review.
-5. Route only clean, confident candidates directly to human review.
-6. Record what would have happened without changing the real review path during shadow mode.
+4. Route evaluative hard failures, uncertainty, and near-boundary results to generative diagnosis/revision and then internal draft creation. Repair structural failures before ordinary draft creation.
+5. Route only clean, confident candidates directly to internal drafts. High confidence alone is not sufficient; quality checks must pass without critical defects or unresolved uncertainty.
+6. Record actual routing, revision lineage, and errors separately for each arm. Humans review resulting drafts at the end of each batch, blinded to arm and evaluator scores.
 
 Do not choose final thresholds by intuition. Calibrate them on a labeled development split, then evaluate them once on a frozen held-out split.
 
@@ -212,11 +215,12 @@ Tests must be generic and self-contained.
 
 ### 9. Benchmark and rollout
 
-Compare three arms over the same normalized candidates:
+Compare two primary workflow arms over the same normalized original candidates:
 
-1. Baseline generative reviewer.
-2. JEV evaluator.
-3. JEV routing followed by generative remediation where policy requires it.
+1. Without JEV: generative review of every valid candidate, policy-controlled revision when needed, then draft creation.
+2. With JEV: atomic evaluation, direct draft creation for clean/confident candidates, otherwise the same generative review/revision process followed by draft creation.
+
+Analyze JEV judgments separately against human labels on the evaluated candidate version. Humans verify drafts at the end; label preserved originals too when needed to measure detection before remediation. Pilot/development drafts are labeled before calibration; held-out drafts are labeled after the policy is frozen. Keep mutation families in one split and report ordinary-generation and defect-enriched cohorts separately.
 
 Choose acceptance metrics after the subject risks are known. At minimum, report:
 
@@ -228,6 +232,10 @@ Choose acceptance metrics after the subject risks are known. At minimum, report:
 - percentage routed to each stage
 - p50/p95 latency and provider cost per candidate
 - stability across repeated runs
+- final-draft acceptance without edits, revision/rejection rates, and remaining critical defects
+- measured human review time and editing effort
+
+Report denominators and uncertainty intervals, accounting for related candidates. Count all provider calls, retries, and revisions in workflow costs. Sample sizes and safety gates must be justified before the held-out evaluation; the README's pilot and main-study sizes are provisional.
 
 Adopt selective routing only when the held-out results meet the documented safety gates and reduce generative-review calls without increasing human effort. Any rubric, prompt, threshold, provider model, or subject-specification change creates a new version and requires replay against the frozen benchmark.
 
@@ -248,10 +256,10 @@ The first milestone does not include:
 
 - importing or migrating content from another project
 - production publishing or automatic approval
-- automatic application of generated rewrites
+- untracked rewrites or automatic application to learner-facing content (linked revisions to internal drafts are allowed)
 - a web editor or review queue
 - translation or localization
 - model training or fine-tuning
 - treating one model's output as human truth
 
-The experiment should answer one question: **for the selected subject, can typed atomic evaluation reduce generative-review work without allowing unacceptable content to bypass that review?**
+The experiment should answer one question: **for the selected subject, can typed atomic evaluation reduce generative-review work while producing drafts of equal or better quality without increasing final human verification effort?**
