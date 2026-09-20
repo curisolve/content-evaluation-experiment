@@ -1,6 +1,6 @@
 schema_version: 1
 id: cmto_v1
-version: 1.0.0-draft.1
+version: 1.0.0-draft.2
 status: pending_owner_review
 created_on: "2026-09-19"
 name: Applying Ontario CMTO professional standards
@@ -27,7 +27,7 @@ difficulty:
   applied: Apply a requirement with an explicit condition or exception.
   integrated: Reconcile two included requirements using all necessary scenario facts.
 authority:
-  inventory: sources/cmto_v1.yaml
+  inventory: sources/cmto_sources_v1.yaml
   source_freeze_required_before_generation: true
   rules:
     - Give both arms identical source context for each original candidate.
@@ -51,7 +51,7 @@ critical_risks:
   - Teaching falsification or misleading professional or financial records.
 dispositions:
   acceptable: Correct, uniquely answerable, source-supported, clear, suitable for its audience, and usable without edits.
-  revisable: No critical defect; a bounded wording, distractor, citation, or explanation edit preserves the learning objective and correct key.
+  revisable: No critical defect; bounded edits could preserve the objective and correct key. An audit label only; no repair task is created.
   rejectable: A critical defect, wrong key, multiple or no defensible answers, unsupported central claim, or repair requiring a new question.
   severity_rule: Ease of editing does not reduce severity; a one-character wrong key is still rejectable as submitted.
   unresolved: A separate review status for insufficient authority or expertise; never silently accepted or assigned a negative score.
@@ -74,6 +74,17 @@ pilot:
     - Pilot is development-only and is never reused as held-out evidence.
   mutation_types: [wrong_key, missing_condition, competing_correct_option, unsupported_rationale, overgeneralized_rule]
 labeling_guide: ../docs/human-labeling-v1.md
+experiment:
+  objective: Minimize cost and time to select enough high-quality, nonredundant MCQs for downstream human approval.
+  arms: [generative_filter, jev_filter]
+  shared_immutable_inputs: true
+  automated_revisions: false
+  human_repair_required: false
+  pilot_audit_count: 60
+  pilot_independent_second_reviews: 15
+  selection: Apply the same versioned diversity and coverage rules to each arm's quality passes.
+  unresolved: Withhold from approval export; retain reasons and events.
+  final_human_approval: Downstream of experiment selection; never inferred from rubric passes.
 approval:
   owner: null
   approved_on: null

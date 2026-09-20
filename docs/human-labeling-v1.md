@@ -1,71 +1,44 @@
-# Human labeling guide v1
+# Human audit guide v1
 
-Status: draft for owner review. Applies to subject `cmto_v1`, version `1.0.0-draft.1`. This is a human guide, not an implemented JEV rubric.
+Status: revised draft for owner review. Applies to subject `cmto_v1`, version `1.0.0-draft.2`. This is a measurement protocol, not a requirement to approve or repair every generated question.
 
-## Review unit and authority
+## Unit, blinding, and timing
 
-Review one immutable MCQ version: stem, four options, key, rationale, audience, difficulty, and a common frozen source pack. Use the approved source requirements and their exceptions. Do not substitute recollection for the selected authority. If authority is missing, contradictory, or not applicable, mark review unresolved and explain what evidence is needed.
+Review an immutable MCQ with its stem, four options, key, rationale, audience, difficulty, and frozen authority pack. Judge the stated facts and applicable exceptions; do not rescue an answer by inventing facts. Incorrect distractors are expected: check that each is inferior under the actual scenario. Check key and rationale independently.
 
-An incorrect distractor is expected. Judge whether it is appropriately incorrect under the stated facts; do not mark the item factually defective simply because distractors are false. Check the key and rationale independently. Do not infer missing scenario facts to rescue an answer.
+The coordinator exports opaque review IDs and hides arm, scores, route, cohort, intended flaws, and selection outcomes. Randomize order, separate family variants, and record reviewer overlap. Label each version once for both arms because neither arm rewrites it. Record the initial verdict and active review time; editing is not required. Final approval of selected items is a separate downstream activity.
 
-## Blinding and sequence
+## Dimensions and verdicts
 
-1. A coordinator assigns opaque review IDs and randomizes presentation after automated draft creation. Hide arm, evaluator scores/comments, route, revision history, intended flaws, and cohort.
-2. Review the item against sources before viewing another related item. Separate family variants and avoid assigning both arms of the same item together when practical; record reviewer overlap.
-3. Assign dimension labels and the initial disposition before editing. Record source locators and a concise reason for failures or uncertainty.
-4. Record active review time separately from editing time and pauses. Preserve the submitted draft, proposed edits, and post-edit verdict separately.
-5. Label preserved originals in the same final review phase when needed for detection metrics. A revised draft's label is not the original's label.
-6. Error/attention flags may be revealed after the initial content judgment for operational handling; record this separately to preserve the blinded comparison.
-
-## Dimensions
-
-Use `pass`, `fail`, or `uncertain`; use `not_applicable` only with an explanation. These are proposed human dimensions; atomic evaluator questions will be derived after approval.
+Use `pass`, `fail`, or `uncertain`; `not_applicable` requires a reason.
 
 | ID | Pass criterion |
 |---|---|
-| authority_accuracy | The key and rationale are supported by the applicable frozen source; conditions and exceptions are preserved. |
-| unique_answer | Exactly one option is best; every distractor is demonstrably inferior under the stated facts. |
-| scenario_sufficiency | The scenario supplies the facts needed to determine the answer without invented assumptions. |
-| rationale_consistency | The rationale supports the key, explains distractors, and does not contradict the stem or source. |
-| clarity | Wording is interpretable without trick phrasing, confusing negation, or accidental answer cues. |
-| audience_fit | Knowledge demands and terminology suit the tagged audience and difficulty. |
-| safety_professionalism | The keyed answer and rationale do not endorse unsafe or professionally prohibited conduct. |
-| source_traceability | References locate the actual supporting requirements in the approved source pack. |
+| authority_accuracy | Key and rationale preserve applicable source requirements, conditions and exceptions. |
+| unique_answer | Exactly one option is best and all distractors are demonstrably inferior. |
+| scenario_sufficiency | Facts needed to apply the source are present. |
+| rationale_consistency | Rationale supports the key, explains distractors, and contradicts neither stem nor authority. |
+| clarity | No confusing wording, tricks, negation or accidental answer cues. |
+| audience_fit | Knowledge demands suit the audience and difficulty. |
+| safety_professionalism | Key and rationale endorse no unsafe or prohibited conduct. |
+| source_traceability | References locate supporting requirements in the frozen source pack. |
 
-Mechanical validation separately checks option count, IDs, empty/duplicate values, required fields, and key membership. A valid key identifier does not establish that its answer is correct.
+Disposition is `acceptable` (no edits needed), `revisable` (noncritical bounded edits would preserve the objective and correct key), or `rejectable` (critical defect, wrong key, multiple/no answers, unsupported central claim, or fundamental reconstruction). Revisable is an analytical label; it does not create a human editing task. Both revisable and rejectable are filter misses if selected as ready for approval.
 
-## Disposition and severity
+`unresolved` is a review status with final disposition unset, not a fourth quality label. Missing/contradictory authority, uncertainty on any applicable dimension, or insufficient expertise requires adjudication. Never count unresolved or absent labels as passes.
 
-- **Acceptable:** Passes all applicable dimensions and needs no edit.
-- **Revisable:** Has no critical defect; bounded edits preserve the learning objective and correct key. Examples: an unnecessarily awkward sentence, a weak distractor, or an imprecise locator where support is unambiguous.
-- **Rejectable:** Has any critical defect, an incorrect key, multiple/no defensible answers, unsupported central advice, or needs fundamental reconstruction. A wrong key remains rejectable even if changing one character fixes it.
-- **Unresolved:** Not a fourth quality verdict. Record missing evidence, conflicting authority, or insufficient reviewer expertise; seek adjudication and leave final disposition unset.
+Critical defects include endorsed invalid consent, boundary violations, improper disclosure, unsafe practice, and false/misleading records. Other wrong answers or ambiguity may be major; local wording problems may be minor. Severity is independent of repair effort: changing one character in a wrong key does not make the submitted item acceptable. Record all defects and cited source locators.
 
-Severity is independent of edit effort. Mark critical when the endorsed answer or explanation could teach invalid consent, boundary violations, improper disclosure, unsafe practice, or falsification/misleading records. Other failures may be major (wrong answer, ambiguity, unsupported claim) or minor (local clarity or presentation). Record all defects, not just the most severe. If any applicable dimension remains uncertain, final disposition remains unresolved until adjudication.
+## Pilot and subsequent sampling
 
-## Reviewer records
+Audit all 60 development inputs once, including 40 ordinary items and 20 controlled variants. Independently double-label a stratified 25% (15 inputs), spanning topics, audiences, difficulties and both cohorts. Keep intended-flaw metadata hidden. Report agreement before adjudication. Additional flagged reviews are separate from the random subset. Preserve original labels and adjudication rationale; no overwritten judgments or fabricated consensus.
 
-Capture review ID; immutable candidate-version ID via coordinator mapping; reviewer pseudonymous ID and qualification; labeling-guide and source-pack versions; each dimension label; defect IDs/severity; source locators; concise reasoning; initial disposition; unresolved reason; review/edit time in seconds; proposed edits; post-edit verdict; and timestamps.
+For larger held-out runs, audit selected items and a probability sample of withheld items, with known inclusion probabilities and a frozen sample manifest. Sampling may be stratified by cohort and the paired outcomes of both filters, but those strata remain hidden from reviewers. Reuse a label for the same immutable input across arms. Use weighting and family-aware uncertainty in aggregate estimates. Selected-only labels cannot establish good-item loss or full defect recall. A single qualified reviewer cannot establish inter-rater reliability.
 
-The coordinator retains arm/family mappings outside the blinded packet. Human labels and adjudications are append-only with supersession links, never overwrites.
+Audit semantic redundancy separately using blinded pairs or groups: record whether items test effectively the same learning point through interchangeable scenarios. Sample suspected exclusions and retained near-neighbors. A shared topic alone is insufficient. Preserve grouping and pair-sampling evidence; content correctness and redundancy are separate judgments.
 
-## Independent review and adjudication
+## Records and reporting
 
-Proposed pilot protocol: independently double-label a stratified 25% sample of each arm's drafts, rounded up, spanning topics, audiences, and difficulty, plus a sample of preserved originals. Additional flagged cases may be reviewed, but report them separately from the random sample. Compute agreement on independent labels before adjudication.
+Capture opaque review ID and coordinator mapping to immutable candidate ID; reviewer pseudonym/qualification; guide/source versions; dimension labels; defects/severity; source locators and reasons; initial disposition or unresolved reason; active review seconds; timestamps; and supersession/adjudication references. Redundancy labels additionally record both item IDs or group ID and the sampling method.
 
-A qualified second reviewer or adjudicator resolves disagreements using cited authority, preserving both original judgments and the rationale for resolution. If no second qualified reviewer is available, report single-reviewer evidence and leave inter-rater reliability unestablished. Do not fabricate consensus.
-
-## Reporting safeguards
-
-Report all submitted originals, created drafts, attention cases, unresolved labels, and excluded records with reasons. Report acceptance without edits separately from post-edit acceptance. Count both revisable and rejectable drafts as needing human intervention; report critical defects separately.
-
-For JEV direct-to-draft analysis, report rejected-direct / all-rejected originals and rejected-direct / all-direct originals, plus intervention-needed-direct / all-direct. Use labels for the exact version JEV evaluated. Do not treat missing human labels as passes.
-
-Pilot labels inform development only. Freeze the policy and safety gates before held-out processing. Human verification stays at the end of each batch.
-
-## Owner review checklist
-
-- Confirm scope and definitions of acceptable, revisable, rejectable, and critical defects.
-- Confirm the proposed pilot coverage and reviewer assignments.
-- Resolve source applicability and freeze the authoritative pack before generation.
-- Use pilot data to set main-study sample size, safety gates, and acceptable quality differences.
+Report audited acceptability and critical defects among selected items, quality-pass versus selection outcomes, good items withheld, per-defect detection, and reviewer effort. Show denominators, missing/unresolved labels, and sampling coverage. Separate ordinary from challenge results. Pilot data is for development only; held-out policies, safety gates, and selection configuration are frozen before evaluation.

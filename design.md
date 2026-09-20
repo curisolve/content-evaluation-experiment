@@ -1,265 +1,60 @@
-# Generic content-generation evaluation experiment
+# Filter-first evaluation design
 
-Status: handoff and design guidelines  
-Date: 2026-09-19
+Status: engineering plan captured for implementation, September 20, 2026. No runnable implementation yet; subject/source approval and pilot calibration remain pending.
 
-Agreed scope and delivery tracking are recorded in [README.md](README.md). The selected subject is CMTO professional standards for RMTs and RMT students, using MCQs. Formal subject specification approval remains a prerequisite for rubric implementation. The experiment now ends automated processing with internal draft creation, followed by human verification.
+The [README](README.md) owns scope and delivery tracking. This design supersedes the earlier review/rewrite/draft comparison. The objective is inexpensive, fast verification and selection of a varied pool for downstream human approval. Neither automated rewriting nor human repair is part of the experiment.
 
-## Handoff
+## Architecture
 
-Build this as a new, standalone Python project. It must not import, copy, migrate, or depend on files, code, schemas, prompts, content, or history from any existing project. The experiment creates its own generated examples, fixtures, labels, configuration, and database.
+Use a standalone Python CLI with domain-neutral modules for configuration, generation, validation, evaluation, selection, workflow, storage, and reporting. Keep subject-specific criteria and sources in versioned configuration. Provider SDKs sit behind local protocols; their response objects never enter domain models. Include fake providers and recorded-response replay.
 
-The goal is to determine whether JEV can evaluate generated content reliably enough to route straightforward items directly to human review while sending weak or uncertain items to a generative reviewer for diagnosis. JEV makes typed, atomic judgments; it does not generate explanations or rewrites.
+SQLite stores immutable candidates, source manifests, evaluator attempts/results, decisions, selections, audit labels, and the event journal. A coordinator invokes generation once and evaluates the same valid candidates in two isolated arms. Arm A uses a structured generative judge; arm B uses JEV atomic typed judgments. A shared deterministic policy engine applies each arm's frozen calibrated policy. A shared diversity/coverage selector operates independently on each arm's passing set. Export selected originals without modifying their content.
 
-Before implementation, the owner must choose a **subject for generation**. Record it in a small subject specification containing:
+See [architecture and flow](docs/architecture.md) and the editable [Excalidraw source](docs/architecture.excalidraw).
 
-- subject name and intended audience
-- content format to generate
-- learning or communication objective
-- allowed and excluded scope
-- difficulty levels, if relevant
-- factual sources or authority standard
-- safety or quality risks
-- what makes an item acceptable, revisable, or rejectable
+## Minimal contracts
 
-Do not invent a domain rubric before the subject is chosen. The subject specification is the source for the generator prompt, deterministic rules, evaluator rubric, and human-labeling guide.
+- `Candidate`: immutable ID, family ID, cohort, subject/schema version, structured MCQ, audience, difficulty, topic and learning objective, source requirement IDs, source-pack hash, generation metadata and input hash.
+- `ExperimentManifest`: input order and hashes, family/split assignments, seeds, source pack, prompt/rubric/policy/selector versions, requested models, concurrency/rate limits, budgets and selection/coverage targets.
+- `ProviderAttempt`: operation and attempt IDs, candidate/arm links, requested and returned model, normalized input hash, timestamps, usage, latency, estimated/actual cost provenance, redacted raw-result reference, success or typed error.
+- `Evaluation`: typed check IDs, normalized judgments, applicable confidence/uncertainty, critical failures, rubric version and attempt link. Higher normalized scores always mean better; missing/failed evaluations never become scores.
+- `Decision`: pass, withhold, or unresolved; stable reason codes and evidence check IDs; exact policy version. Deterministic invalidity is a separate validation decision.
+- `Selection`: selected or excluded, reason, duplicate representative/group and similarity evidence when applicable, coverage state, selector version and input ordering.
+- `AuditLabel`: exact candidate version, reviewer qualifications/pseudonym, dimension labels, disposition, defects/severity, cited evidence, timing, and supersession/adjudication links.
+- `Event`: the durable envelope and lifecycle described in [events.md](docs/events.md).
 
-The first milestone is an offline CLI experiment, not a production application. Stop after producing a benchmark report and make the adoption decision from evidence.
+`ProviderAttempt` usage must follow the [token and cost accounting contract](docs/events.md#token-and-cost-accounting): retain raw reported usage plus normalized billing categories, exact provider/model/service configuration, a versioned rate card, and measured/estimated/unknown provenance. Include generation and semantic-provider calls, not just the evaluation arms. Preserve reasoning counts as a breakdown of output when applicable rather than billing them twice. Default comparisons use one fixed LLM model against JEV; compact structured outputs, cache policy, and any batch-mode variant are explicit manifest settings.
 
-### Expected deliverables
+Store intended flaws separately from evaluator and reviewer packets. Never expose arm, score, route, cohort, or intended flaw in blinded audit exports. Use an opaque review ID mapping retained by the coordinator.
 
-1. A new repository with its own README, dependency lockfile, environment example, and CI checks.
-2. A versioned subject specification and content schema.
-3. A generator that creates a fresh synthetic benchmark pool for the selected subject.
-4. Deterministic validation for rules that code can prove.
-5. A versioned JEV rubric made of atomic typed questions.
-6. A generative-reviewer adapter used as a comparison and optional remediation stage.
-7. Fake provider adapters for unit and contract tests.
-8. Append-only experiment storage.
-9. A reproducible benchmark command and machine-readable manifest.
-10. A Markdown and JSON report covering quality, calibration, routing, latency, cost, and disagreements.
+## Workflow and stopping
 
-### Completion criteria
+An immutable input is validated once. Invalid inputs are withheld and counted. Each valid input gets one logical evaluation per arm, with bounded transient retries. A successful evaluation becomes pass or withhold under that arm's policy; an unsuccessful or uncertain evaluation remains unresolved/withheld from selection. Only quality passes enter selection. Diversity exclusions do not imply a quality failure. Only selected originals enter the approval export.
 
-The handoff is complete when another developer can clone only the new repository, choose or read its subject specification, configure provider keys, generate a fresh dataset, run all tests, reproduce the benchmark, and understand the result without access to any other repository.
+Record all attempts and terminal outcomes, including rate limits, exhausted retries, timeouts, cancellation, budget exhaustion, and incomplete provider calls after a crash. A provider outage cannot turn an item into a pass. Resume completed logical work idempotently; do not claim exactly-once external billing when a provider response was lost. Record unknown usage/cost explicitly.
 
-## Design guidelines
+Use a fixed, shared pool and order for the paired study. Freeze per-provider concurrency and limits and disclose them. Measure actual arm elapsed time; do not add per-call latencies and label the sum wall time. Shared generation/validation costs and time are part of each hypothetical standalone deployment estimate, with the allocation documented. Report actual experiment spending separately.
 
-### 1. Greenfield and domain-independent
+An operational run can generate more bounded batches until quality/diversity targets or resource caps are reached. Defer adaptive generation in the first paired benchmark. Quality gates stay fixed even when coverage targets cannot be filled.
 
-- Use neutral names such as `content`, `candidate`, `dimension`, and `evaluation`; do not encode a particular organization, profession, exam, or subject in package names.
-- Keep subject-specific material in versioned configuration and prompt files, not application code.
-- Generate all experiment content inside the new project. Do not require an import command or a seed dataset from another system.
-- Use public factual references where the chosen subject needs an authority source. Record source identifiers with generated items.
-- Treat generated examples as untrusted until validated and reviewed.
+## Quality and redundancy
 
-### 2. Suggested stack and layout
+Derive atomic checks from the approved subject; deterministic validation remains authoritative for shape and mechanically provable rules. JEV produces typed judgments, never rewrites or narrative explanations. The generative baseline returns the same necessary decision fields, with model-specific calibration where needed. Fairness means equivalent criteria/context and disclosed settings, not pretending the evaluators use identical prompts or confidence scales.
 
-Use Python 3.12+, `uv`, Pydantic v2, Typer, SQLite, `pytest`, `pytest-asyncio`, `ruff`, and a static type checker. Keep telemetry behind an internal interface. Avoid a web UI until the evaluation contract and routing policy are stable.
+Start with normalized exact fingerprints and one reproducible semantic method. Version normalization, embedding/model choice if used, similarity threshold, tie-breaking, and ordering. Preserve similarity edges and group membership: pairwise thresholds are not necessarily transitive. Choose and document a grouping algorithm before implementation. The same selector settings apply to both arms. Use stable ordering to choose representatives, and include learning-objective/requirement evidence in manual checks of suspected redundancy. Audit both exclusions and retained near-neighbors to estimate false merges and missed redundancy.
 
-```text
-content-evaluation-experiment/
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── .env.example
-├── subjects/
-│   └── selected_subject.yaml
-├── rubrics/
-│   └── subject_v1.yaml
-├── policies/
-│   └── shadow_v1.yaml
-├── src/content_eval/
-│   ├── cli.py
-│   ├── config.py
-│   ├── domain/
-│   ├── generation/
-│   ├── evaluation/
-│   ├── policy/
-│   ├── workflow/
-│   ├── storage/
-│   └── telemetry/
-├── tests/
-│   ├── unit/
-│   ├── contract/
-│   ├── integration/
-│   └── fixtures/
-└── experiments/
-    ├── manifests/
-    └── reports/
-```
+A candidate may be a valid quality pass yet contribute no new variety. Report quality passes, nonredundant selections, family counts, and coverage separately. Do not claim topic coverage proves semantic variety.
 
-Provider implementations must satisfy local protocols. Provider SDK types must not leak into domain models, policy code, or tests.
+## Evidence and reporting
 
-### 3. Pipeline boundary
+The development pilot labels the same 60 immutable inputs once and uses those labels for both arms. Independently double-label 15 stratified inputs. Pilot labels support tuning only. Keep source parents, mutations, and semantic near-duplicate families together when splitting; use fresh held-out families after freezing the configuration.
 
-```text
-subject specification
-        |
-        v
-fresh content generation
-        |
-        v
-deterministic validation
-        |
-        v
-JEV atomic evaluation --------> versioned routing policy
-                                     | clean and confident
-                                     |---------------------> internal draft -> human review
-                                     |
-                                     | weak or uncertain
-                                     v
-                          generative diagnosis/rewrite
-                                     |
-                                     v
-                           internal draft -> human review
-```
+Audit all selected items when feasible. If larger runs require sampling, predeclare sampling strata and probabilities for selected and withheld items, preserve the sample manifest, and use weighted estimators. Selected-only audit supports selection quality, not missed-good yield or defect recall. Treat unresolved and missing labels explicitly. Report ordinary and challenge cohorts separately, with paired comparisons and family-aware uncertainty.
 
-Compare two isolated workflows on the same original candidates: a baseline that uses generative review for every valid MCQ, and a JEV workflow that selectively invokes the same generative reviewer. Both may apply policy-controlled revisions and create internal drafts before final human verification. In the CLI milestone, draft creation means database records and review exports, not external publication. Neither workflow may approve content for learners. Only a human may assign the final benchmark label. Preserve JEV results for a secondary evaluator-only analysis.
+Reports include counts and denominators, quality/critical escapes, diverse yield and coverage, cost and time to target, cost per selected item, audited quality estimates, good items withheld, provider failure rates, cost completeness, and human audit effort. Do not divide spending by an unaudited count and call it cost per verified-good item. Freeze adoption gates and a justified held-out sample size after the pilot; insufficient evidence is a valid result.
 
-### 4. Domain contracts
+## Verification and exclusions
 
-Define a stable `Candidate` model with:
+Required tests cover schema validation, check polarity, routing uncertainty/errors, idempotent resume, immutable input sharing, selector determinism, blinding, accounting, atomic state/event persistence, cancellation/crash recovery, and identical projections from live events versus replay. Use temporary databases and fake/recorded adapters; live tests are opt-in with small budgets. Preserve seed and exact returned model metadata; live generation need not be deterministic.
 
-- immutable candidate ID
-- subject-specification version
-- requested content type and difficulty
-- structured generated content
-- generator, exact model, prompt version, seed, batch, and timestamps
-- optional factual-source references
-
-Keep the generated payload flexible enough for the selected content format, but validate it through a versioned Pydantic schema. Do not place provider response objects in the domain model.
-
-Every provider call creates an append-only `EvaluationRun` with:
-
-- run ID and candidate ID
-- evaluator kind and exact returned model identifier
-- rubric and policy versions
-- normalized input hash
-- complete normalized result
-- raw result or a redacted reference
-- usage, latency, retry count, and estimated cost
-- success or explicit error category
-- creation timestamp
-
-Never overwrite an earlier run. Derive the current view by querying the latest applicable successful run.
-
-Use explicit workflow states:
-
-```text
-generated -> validated -> evaluated -> draft -> awaiting_human
-evaluated -> remediation_requested -> remediated -> revalidated -> draft
-awaiting_human -> accepted | revision_required | rejected
-```
-
-An evaluator failure is a visible state or event, never a low quality score.
-Structurally valid candidates with unresolved evaluation errors may become drafts needing attention. Unrepaired structural failures remain in an attention queue/export. Preserve each revision as a linked immutable candidate; draft labels apply to that version, not automatically to its original.
-
-### 5. Rubric design
-
-Build the rubric only after the subject specification is approved.
-
-- Decompose quality into atomic questions that can be judged independently.
-- Use binary probability judgments for crisp defects.
-- Use ordered scores only when the dimension is genuinely gradual, and describe every level concretely.
-- Make each check's polarity consistent in the adapter: `1.0` always means the candidate meets the rubric.
-- Keep evidence check IDs so every aggregate dimension can be traced to its atomic inputs.
-- Separate factual correctness, instruction compliance, clarity, internal consistency, audience fit, safety, and style when those dimensions apply.
-- Do not ask JEV to explain defects or rewrite content.
-- Keep deterministic checks authoritative for schema shape, bounds, required fields, duplicated values, and other mechanically provable rules.
-
-A normalized result should contain dimension scores, applicable confidence values, hard failures, uncertain checks, evidence check IDs, and a proposed route. It must not pretend that typed evaluation produced narrative comments.
-
-### 6. Policy design
-
-Keep routing policy outside evaluator prompts and version it independently.
-
-The policy should:
-
-1. Normalize evaluator outputs.
-2. Aggregate atomic checks into named display dimensions.
-3. Identify critical dimensions from the subject's documented risks.
-4. Route evaluative hard failures, uncertainty, and near-boundary results to generative diagnosis/revision and then internal draft creation. Repair structural failures before ordinary draft creation.
-5. Route only clean, confident candidates directly to internal drafts. High confidence alone is not sufficient; quality checks must pass without critical defects or unresolved uncertainty.
-6. Record actual routing, revision lineage, and errors separately for each arm. Humans review resulting drafts at the end of each batch, blinded to arm and evaluator scores.
-
-Do not choose final thresholds by intuition. Calibrate them on a labeled development split, then evaluate them once on a frozen held-out split.
-
-### 7. Fresh benchmark construction
-
-Create the benchmark without copying existing private content:
-
-1. Generate a diverse synthetic pool from the selected subject specification.
-2. Include expected-good and intentionally flawed items.
-3. Create controlled mutation pairs that introduce exactly one defect at a time.
-4. Include difficult cases that appear polished but contain factual or logical errors.
-5. Have qualified humans label every dimension and final disposition.
-6. Double-label a meaningful sample and adjudicate disagreements.
-7. Freeze train, validation, and test manifests before threshold tuning.
-
-The generator must support a deterministic seed and record all prompt/model metadata. Synthetic labels such as “intended flaw” are test construction metadata, not ground truth; human review establishes the benchmark label.
-
-### 8. Testing strategy
-
-Tests must be generic and self-contained.
-
-- Unit tests use inline builders or fixtures created inside the new repository.
-- Contract tests use fake provider responses checked against local protocols.
-- Integration tests create temporary databases and generated sample records at runtime.
-- No test reads paths, environment files, datasets, or source code from another repository.
-- No test requires real provider credentials unless explicitly marked as an opt-in live test.
-- Live tests use a small limit, never run in default CI, and store no secrets or proprietary prompts in artifacts.
-- Add polarity tests proving that every normalized score uses the same “higher is better” convention.
-- Add replay tests proving that a frozen manifest and fake responses produce the same report.
-- Add failure tests for timeouts, malformed provider output, retries, and partial runs.
-
-### 9. Benchmark and rollout
-
-Compare two primary workflow arms over the same normalized original candidates:
-
-1. Without JEV: generative review of every valid candidate, policy-controlled revision when needed, then draft creation.
-2. With JEV: atomic evaluation, direct draft creation for clean/confident candidates, otherwise the same generative review/revision process followed by draft creation.
-
-Analyze JEV judgments separately against human labels on the evaluated candidate version. Humans verify drafts at the end; label preserved originals too when needed to measure detection before remediation. Pilot/development drafts are labeled before calibration; held-out drafts are labeled after the policy is frozen. Keep mutation families in one split and report ordinary-generation and defect-enriched cohorts separately.
-
-Choose acceptance metrics after the subject risks are known. At minimum, report:
-
-- unsafe-pass rate for human-rejected items routed as clean
-- recall for each critical defect
-- per-dimension agreement with humans
-- disposition precision, recall, and confusion matrix
-- probability calibration
-- percentage routed to each stage
-- p50/p95 latency and provider cost per candidate
-- stability across repeated runs
-- final-draft acceptance without edits, revision/rejection rates, and remaining critical defects
-- measured human review time and editing effort
-
-Report denominators and uncertainty intervals, accounting for related candidates. Count all provider calls, retries, and revisions in workflow costs. Sample sizes and safety gates must be justified before the held-out evaluation; the README's pilot and main-study sizes are provisional.
-
-Adopt selective routing only when the held-out results meet the documented safety gates and reduce generative-review calls without increasing human effort. Any rubric, prompt, threshold, provider model, or subject-specification change creates a new version and requires replay against the frozen benchmark.
-
-### 10. Reliability and operations
-
-- Keep provider keys only in environment variables or a secret manager.
-- Retry only transient failures with bounded exponential backoff and jitter.
-- Configure concurrency and rate limits independently per provider.
-- Make submissions idempotent for `(input_hash, rubric_version, evaluator, model)` unless explicitly forced.
-- Record the exact returned model identifier.
-- Confirm provider retention, training, region, and deletion terms before sending sensitive material.
-- Never let evaluator availability block manual review; degraded mode routes candidates to humans with a visible error.
-- Support dry runs, resumability, deterministic selection, and JSON output for every experiment command.
-
-### 11. Deliberate exclusions
-
-The first milestone does not include:
-
-- importing or migrating content from another project
-- production publishing or automatic approval
-- untracked rewrites or automatic application to learner-facing content (linked revisions to internal drafts are allowed)
-- a web editor or review queue
-- translation or localization
-- model training or fine-tuning
-- treating one model's output as human truth
-
-The experiment should answer one question: **for the selected subject, can typed atomic evaluation reduce generative-review work while producing drafts of equal or better quality without increasing final human verification effort?**
+No web UI, model training, external publication, automatic learner approval, rewriting, cross-project imports, or full TUI implementation in the first milestone. The event journal and replay contract are mandatory now so the TUI can be added without reconstructing lost history.
