@@ -14,6 +14,7 @@ from content_eval.cmto import continuation_manifest, make_manifest, reevaluation
 from content_eval.cmto import execute as execute_cmto
 from content_eval.live import LiveConfig, LiveEvaluator, credential_status, smoke_manifest
 from content_eval.models import Arm, Event, Manifest, canonical, digest
+from content_eval.policy_analysis import analyze_policy
 from content_eval.projection import project
 from content_eval.providers import Evaluator
 from content_eval.sources import load_pack
@@ -133,6 +134,61 @@ def cmto_run(
         with httpx.Client(trust_env=False, follow_redirects=False) as client, Store(db) as store:
             run_id = execute_cmto(store, manifest, client)
             emit(project(store.events(run_id)))
+    except (ValueError, OSError, KeyError, InvalidOperation) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("cmto-validate")
+def cmto_validate(
+    run_id: RunID,
+    max_estimated_usd: Annotated[str, typer.Option("--max-estimated-usd")],
+    db: Database = Path("runs/cmto.sqlite"),
+    output: Path | None = None,
+    reviewed_manifest_hash: str | None = None,
+    execute: bool = False,
+) -> None:
+    """Freeze/preview a fresh validation batch; explicit hash and spend gate for execution."""
+    from content_eval.validation import reject_existing_validation, validation_manifest
+
+    try:
+        with Store(db, read_only=True) as store:
+            manifest = validation_manifest(store, run_id, Decimal(max_estimated_usd))
+            reject_existing_validation(store, run_id)
+        data = manifest.model_dump(mode="json")
+        fingerprint = digest(data)
+        if execute:
+            if output is not None:
+                raise ValueError("--output is for preview/freeze only")
+            if reviewed_manifest_hash != fingerprint:
+                raise ValueError("review the frozen plan and provide its --reviewed-manifest-hash")
+            with (
+                Store(db) as store,
+                httpx.Client(trust_env=False, follow_redirects=False) as client,
+            ):
+                child = execute_cmto(store, manifest, client)
+                emit(project(store.events(child)))
+            return
+        if output is not None:
+            with output.open("x") as stream:
+                stream.write(canonical({"manifest_hash": fingerprint, "manifest": data}) + "\n")
+        emit(
+            {
+                "mode": "prospective_validation_preview",
+                "manifest_hash": fingerprint,
+                "policy": manifest.policy.model_dump(mode="json"),
+                "generator": manifest.provider_config["generator"],
+                "reviewer": manifest.provider_config["llm"],
+                "maximum_calls": manifest.provider_config["max_calls"],
+                "estimated_spend_guard_usd": max_estimated_usd,
+                "items": 20,
+                "reused_candidates": 0,
+                "network_calls": 0,
+                "frozen_plan": str(output) if output else None,
+                "execution_requires": "--execute and --reviewed-manifest-hash matching this plan",
+                "warning": "Not a billed cap. Fresh human review and cross-pool overlap review "
+                "are required; zero unresolved is not guaranteed for provider failures.",
+            }
+        )
     except (ValueError, OSError, KeyError, InvalidOperation) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -267,6 +323,25 @@ def import_audit(
             count = import_labels(store, run_id, labels)
             emit({"labels_imported": count, "report": project(store.events(run_id))})
     except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("analyze-policy")
+def policy_analysis(
+    run_id: RunID,
+    db: Database = Path("runs/cmto.sqlite"),
+    threshold: float | None = None,
+    output: Path | None = None,
+) -> None:
+    """Offline filter-first counterfactual; preserves the journal and live policy."""
+    try:
+        with Store(db, read_only=True) as store:
+            result = analyze_policy(store.events(run_id), threshold)
+        if output is not None:
+            with output.open("x") as stream:
+                stream.write(canonical(result) + "\n")
+        emit(result)
+    except (ValueError, OSError, KeyError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 

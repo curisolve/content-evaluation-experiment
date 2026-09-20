@@ -203,6 +203,7 @@ def accuracy(
     *,
     reference_type: str = "human",
     population: str | None = None,
+    decision_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     pool = candidates(events)
     refs: dict[str, str] = {}
@@ -230,8 +231,15 @@ def accuracy(
     decisions = {
         e.candidate_id: str(e.payload["decision"])
         for e in events
-        if e.event_type == "decision.recorded" and e.arm == arm
+        if e.event_type == "decision.recorded" and e.arm == arm and e.candidate_id is not None
     }
+    if decision_overrides is not None:
+        # Explicit offline counterfactuals only; never change persisted decisions.
+        if set(decision_overrides) - set(pool) or any(
+            value not in {"pass", "withhold", "unresolved"} for value in decision_overrides.values()
+        ):
+            raise ValueError("invalid counterfactual decisions")
+        decisions = decision_overrides
     labelled = {cid: verdict for cid, verdict in refs.items() if verdict != "unresolved"}
     evaluated = {cid: verdict for cid, verdict in labelled.items() if cid in decisions}
     correct = sum(

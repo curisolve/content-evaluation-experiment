@@ -272,7 +272,14 @@ def _evaluate(
             )
     if success:
         evaluation = Evaluation.model_validate(success.payload["evaluation"])
-        decision, reason = manifest.policy.decide(evaluation)
+        if manifest.policy.version == "cmto-filter-first-validation-v1":
+            from content_eval.policy_analysis import filter_decision
+
+            decision, reason = filter_decision(
+                evaluation, manifest.policy.required_checks, manifest.policy.threshold, arm
+            )
+        else:
+            decision, reason = manifest.policy.decide(evaluation)
         if not any(e.event_type == "evaluation.completed" for e in own):
             store.append(
                 run_id,

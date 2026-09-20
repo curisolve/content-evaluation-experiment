@@ -238,6 +238,13 @@ def project(events: list[Event]) -> dict[str, Any]:
                 "qualification": "reviewer-attested, not independently verified",
             }
         pool_reference = manifest.provider_config.get("evaluation_pool")
+        validation = manifest.provider_config.get("validation")
+        if isinstance(validation, dict):
+            report["validation"] = {
+                key: value for key, value in validation.items() if key != "excluded_stems"
+            }
+            report["validation"]["policy"] = manifest.policy.model_dump(mode="json")
+            report["validation"]["status"] = "pending_independent_quality_and_overlap_review"
         if isinstance(pool_reference, dict):
             report["evaluation_pool"] = {
                 k: v for k, v in pool_reference.items() if k not in {"inputs", "input_hashes"}

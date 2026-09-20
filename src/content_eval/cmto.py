@@ -321,6 +321,11 @@ def _generate_pool(
                         "rubric": cfg["pack"]["rubric"],
                         "assignment": slot,
                         "parent": parent,
+                        **(
+                            {"excluded_development_stems": cfg["validation"]["excluded_stems"]}
+                            if "validation" in cfg
+                            else {}
+                        ),
                     }
                 ),
                 cfg["generator_instructions"],
@@ -402,6 +407,10 @@ def _generate_pool(
         try:
             candidate = Candidate.model_validate(raw)
             validate_candidate(candidate, manifest)
+            if "validation" in cfg and " ".join(candidate.stem.casefold().split()) in {
+                " ".join(stem.casefold().split()) for stem in cfg["validation"]["excluded_stems"]
+            }:
+                raise ValueError("generated stem overlaps the development pool")
         except ValueError as exc:
             store.append(
                 run_id,
@@ -452,7 +461,7 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         llm,
         Decimal(cfg["max_estimated_usd"]),
         max_calls=cfg["max_calls"],
-        threshold=manifest.policy.threshold,
+        threshold=0.9 if "validation" in cfg else manifest.policy.threshold,
         generation_timeout_seconds=cfg.get("generation_timeout_seconds"),
         generator=LiveConfig.model_validate(cfg["generator"]) if "generator" in cfg else None,
     )
@@ -471,6 +480,12 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
                 "provider_config": {**expected.provider_config, "continuation": cfg["continuation"]}
             }
         )
+    if "validation" in cfg:
+        from content_eval.validation import validation_manifest
+
+        expected = validation_manifest(
+            store, cfg["validation"]["parent_run_id"], Decimal(cfg["max_estimated_usd"])
+        )
     if manifest != expected:
         raise ValueError("manifest differs from the supported frozen development configuration")
     # Require both credentials before creating a run or charging for generation.
@@ -482,7 +497,7 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
             questions=cfg["questions"],
             instructions=cfg["instructions"],
             max_input_bytes=MAX_INPUT_BYTES,
-            uncertainty_threshold=manifest.policy.threshold,
+            uncertainty_threshold=0.9 if "validation" in cfg else manifest.policy.threshold,
         )
         for arm in ("llm", "jev")
     }
@@ -500,6 +515,10 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         else LiveEvaluator(generator_config, client, max_input_bytes=MAX_INPUT_BYTES)
     )
     with store.writer():
+        if "validation" in cfg:
+            from content_eval.validation import reject_existing_validation
+
+            reject_existing_validation(store, cfg["validation"]["parent_run_id"])
         if "evaluation_pool" in cfg:
             validate_evaluation_pool(store, manifest)
         if "continuation" in cfg:
@@ -576,6 +595,8 @@ def continuation_manifest(
     if any(e.event_type == "candidate.invalid" for e in events):
         raise ValueError("invalid content is not automatically regenerated or repaired")
     cfg = cast(dict[str, Any], old.provider_config)
+    if "validation" in cfg:
+        raise ValueError("validation continuations need explicit protocol review; not supported")
     inherited = cfg.get("continuation", {})
     prepared = {item["id"]: item for item in inherited.get("prepared", [])}
     for event in events:
@@ -674,6 +695,8 @@ def reevaluation_manifest(
         raise ValueError("reevaluation requires a completed CMTO pool")
     old = Manifest.model_validate(events[0].payload["manifest"])
     cfg = cast(dict[str, Any], old.provider_config)
+    if "validation" in cfg:
+        raise ValueError("validation reevaluation would change the frozen protocol; not supported")
     generator = LiveConfig.model_validate(cfg.get("generator", cfg["llm"]))
     pool = next(e.payload for e in events if e.event_type == "pool.frozen")
     inputs = pool["inputs"]

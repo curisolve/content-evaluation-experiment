@@ -675,6 +675,154 @@ def labelled_packet(path: Path, *, reference_type: str = "human") -> dict[str, A
     return packet
 
 
+def validation_parent(store: Store, packet: Path) -> str:
+    from content_eval.audit import export_packet, import_labels
+
+    with httpx.Client(transport=transport([])) as client:
+        parent = execute(store, manifest("openai"), client)
+    export_packet(store, parent, packet)
+    data = labelled_packet(packet)
+    for item in data["items"]:
+        item.update(disposition="acceptable", notes="Independent fixture review.", review_seconds=1)
+    packet.write_text(json.dumps(data))
+    import_labels(store, parent, packet)
+    return parent
+
+
+def test_prospective_validation_frozen_policy_and_fresh_pool(tmp_path: Path) -> None:
+    from content_eval.validation import validation_manifest
+
+    calls: list[dict[str, Any]] = []
+    normal = transport(calls)
+
+    def fresh(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        answer = normal.handle_request(request)
+        raw = answer.json()
+        if "state" in body:
+            for value in raw["answers"].values():
+                value["noul"] = 0.85  # Old uncertainty flag must not veto frozen 0.5 policy.
+        elif "messages" in body:
+            content = json.loads(body["messages"][0]["content"])
+            if "assignment" in content:
+                assert content["excluded_development_stems"]
+                value = json.loads(raw["content"][0]["text"])
+                value["stem"] = "New validation scenario: " + value["stem"]
+                raw["content"][0]["text"] = json.dumps(value)
+        return httpx.Response(200, json=raw)
+
+    with Store(tmp_path / "run.db") as store:
+        parent = validation_parent(store, tmp_path / "packet.json")
+        before = store.events(parent)
+        frozen = validation_manifest(store, parent, Decimal("5"))
+        assert frozen == validation_manifest(store, parent, Decimal("5"))
+        assert frozen.policy.threshold == 0.5
+        assert "reference" not in frozen.source_text
+        changed = frozen.model_copy(
+            update={"policy": frozen.policy.model_copy(update={"threshold": 0.6})}
+        )
+        with httpx.Client(transport=httpx.MockTransport(fresh)) as client:
+            with pytest.raises(ValueError, match="manifest differs"):
+                execute(store, changed, client)
+            assert calls == []
+            child = execute(store, frozen, client)
+            assert len(calls) == 56
+            with pytest.raises(ValueError, match="already started"):
+                execute(store, frozen, client)
+            assert len(calls) == 56
+        result = project(store.events(child))
+        assert result["collection_complete"]
+        assert result["arms"]["jev"]["unresolved"] == 0
+        assert result["arms"]["jev"]["quality_passes"] == 20
+        assert result["arms"]["jev"]["accuracy"] is None
+        assert result["validation"]["policy"]["threshold"] == 0.5
+        assert store.events(parent) == before
+        successes = [
+            e for e in store.events(child) if e.arm == "jev" and e.event_type == "attempt.succeeded"
+        ]
+        assert all(e.payload["evaluation"]["uncertain"] for e in successes)
+
+
+def test_validation_overlap_stops_before_evaluation(tmp_path: Path) -> None:
+    from content_eval.validation import validation_manifest
+
+    with Store(tmp_path / "run.db") as store:
+        parent = validation_parent(store, tmp_path / "packet.json")
+        calls: list[dict[str, Any]] = []
+        frozen = validation_manifest(store, parent, Decimal("5"))
+        with httpx.Client(transport=transport(calls)) as client:
+            child = execute(store, frozen, client)
+        result = project(store.events(child))
+        assert not result["collection_complete"]
+        assert result["invalid"] == 1
+        assert result["arms"]["jev"]["attempts"] == 0
+        assert len(calls) == 1
+
+
+def test_validation_cli_requires_exact_reviewed_hash(tmp_path: Path) -> None:
+    database = tmp_path / "run.db"
+    with Store(database) as store:
+        parent = validation_parent(store, tmp_path / "packet.json")
+    runner = CliRunner()
+    output = tmp_path / "plan.json"
+    args = ["cmto-validate", parent, "--db", str(database), "--max-estimated-usd", "5"]
+    result = runner.invoke(app, [*args, "--output", str(output)])
+    assert result.exit_code == 0, result.output
+    preview = json.loads(result.output)
+    assert preview["network_calls"] == 0
+    saved = json.loads(output.read_text())
+    assert saved["manifest_hash"] == digest(saved["manifest"]) == preview["manifest_hash"]
+    assert runner.invoke(app, [*args, "--output", str(output)]).exit_code != 0
+    assert runner.invoke(app, [*args, "--execute"]).exit_code != 0
+    assert (
+        runner.invoke(app, [*args, "--execute", "--reviewed-manifest-hash", "wrong"]).exit_code != 0
+    )
+
+
+def test_offline_policy_analysis_preserves_baseline_and_labels(tmp_path: Path) -> None:
+    from content_eval.audit import export_packet, import_labels
+    from content_eval.policy_analysis import analyze_policy
+
+    database = tmp_path / "analysis.db"
+    packet = tmp_path / "review.json"
+    with Store(database) as store:
+        with httpx.Client(transport=transport([])) as client:
+            mid = execute(store, manifest("openai"), client)
+        export_packet(store, mid, packet)
+        before_labels = analyze_policy(store.events(mid), 0.5)
+        assert before_labels["arms"]["jev"]["accuracy_details"]["accuracy"] is None
+        packet.write_text(json.dumps(labelled_packet(packet)))
+        import_labels(store, mid, packet)
+        events = store.events(mid)
+        baseline = project(events)
+        result = analyze_policy(events, 0.5)
+        assert result["arms"]["jev"]["decisions"] == before_labels["arms"]["jev"]["decisions"]
+        assert result["parent_event_hash"] == events[-1].event_hash
+        assert result["network_calls"] == 0
+        assert result["new_inference_cost_usd"] == "0"
+        assert result["arms"]["jev"]["accuracy_details"]["labelled_evaluated"] == 3
+        assert result["arms"]["jev"]["unresolved"] == 0
+        assert result == analyze_policy(events, 0.5)
+        unhashed = {key: value for key, value in result.items() if key != "analysis_hash"}
+        assert digest(unhashed) == result["analysis_hash"]
+        output = tmp_path / "policy.json"
+        args = [
+            "analyze-policy",
+            mid,
+            "--db",
+            str(database),
+            "--threshold",
+            "0.5",
+            "--output",
+            str(output),
+        ]
+        assert CliRunner().invoke(app, args).exit_code == 0
+        assert json.loads(output.read_text()) == result
+        assert CliRunner().invoke(app, args).exit_code != 0  # No overwrite.
+        assert store.events(mid) == events
+        assert project(events) == baseline
+
+
 def test_blinded_audit_accuracy_abstentions_and_replay(tmp_path: Path) -> None:
     from content_eval.audit import export_packet, import_labels
 
