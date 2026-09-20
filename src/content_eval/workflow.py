@@ -30,10 +30,16 @@ def run(
             manifest = frozen
             if report["status"] == "completed":
                 return run_id
+            if manifest.mode == "live-smoke" and evaluators is None:
+                raise ValueError(
+                    "live resume needs explicitly configured adapters; fake fallback forbidden"
+                )
             store.append(run_id, "run.resumed", {})
         else:
             if manifest is None:
                 raise ValueError("unknown run ID")
+            if manifest.mode == "live-smoke" and evaluators is None:
+                raise ValueError("live run requires explicitly configured adapters")
             data = manifest.model_dump(mode="json")
             inputs = generate(manifest)
             store.append(
@@ -186,6 +192,8 @@ def _evaluate(
                 operation_id=operation,
             )
         attempt = f"{operation}:{number}"
+        build_request = getattr(provider, "request_body", None)
+        request_payload = build_request(candidate) if callable(build_request) else None
         store.append(
             run_id,
             "attempt.started",
@@ -193,6 +201,8 @@ def _evaluate(
                 "number": number,
                 "requested_model": provider.model,
                 "input_hash": digest(candidate.model_dump(mode="json")),
+                "request_payload": request_payload,
+                "request_hash": digest(request_payload) if request_payload is not None else None,
                 "rate_card_id": manifest.rates[arm].id,
             },
             arm=arm,
@@ -206,14 +216,18 @@ def _evaluate(
             # Isolate adapters so they cannot alter persisted inputs or the other arm.
             result = provider.evaluate(candidate.model_copy(deep=True), number)
         except ProviderError as exc:
+            error_cost = manifest.rates[arm].cost(exc.usage) if exc.pricing_applicable else None
             store.append(
                 run_id,
                 "attempt.failed",
                 {
                     "category": exc.category,
                     "transient": exc.transient,
-                    "usage": None,
-                    "cost_usd": None,
+                    "usage": exc.usage.model_dump(mode="json") if exc.usage else None,
+                    "cost_usd": str(error_cost) if error_cost is not None else None,
+                    "returned_model": exc.returned_model,
+                    "request_id": exc.request_id,
+                    "raw_response": exc.raw_response,
                     "latency_ns": time.monotonic_ns() - started,
                 },
                 arm=arm,
@@ -224,14 +238,16 @@ def _evaluate(
             if not exc.transient:
                 break
         else:
-            cost = manifest.rates[arm].cost(result.usage)
+            cost = manifest.rates[arm].cost(result.usage) if result.pricing_applicable else None
             success = store.append(
                 run_id,
                 "attempt.succeeded",
                 {
                     "returned_model": result.model,
                     "evaluation": result.evaluation.model_dump(mode="json"),
-                    "usage": result.usage.model_dump(mode="json"),
+                    "usage": result.usage.model_dump(mode="json") if result.usage else None,
+                    "request_id": result.request_id,
+                    "raw_response": result.raw_response,
                     "cost_usd": str(cost) if cost is not None else None,
                     "rate_card_id": manifest.rates[arm].id,
                     "latency_ns": time.monotonic_ns() - started,

@@ -2,6 +2,8 @@
 
 The CLI currently runs synthetic arithmetic fixtures through two fake evaluators. It tests orchestration and accounting, not JEV/LLM accuracy, CMTO content, or provider pricing. Both fake arms intentionally give the same judgments and use synthetic rates. No credentials or network calls are needed to run it after dependency installation.
 
+Opt-in [real-provider smoke adapters](providers.md) are also available. They use the same toy fixtures with actual APIs; mocked tests verify contracts, but no account-specific live verification has been performed. The offline demo remains unchanged.
+
 Use a development worktree, not the synchronized `worksync` checkout.
 
 ## Setup and run
@@ -42,15 +44,15 @@ Ctrl-C records cancellation. Use `runs` to find the ID and `resume` to continue.
 
 SQLite events are append-only and hash chained. State is derived from events, eliminating a second mutable state table. Each append uses a transaction, WAL and FULL synchronization. A nonblocking advisory file lock permits one coordinator per database on macOS/Linux. The implementation is not a distributed or Windows runner. Events contain UTC timestamps plus process-session monotonic offsets; replay uses their original values. Report and replay use the same reducer.
 
-Pydantic contracts keep candidates, policies, usage, rates and evaluation results outside provider SDKs. Token input categories are disjoint, reasoning is a subset of output, and decimal cost calculation does not round until display. The generic inclusive-input constructor requires known disjoint cache categories; it is not a complete OpenAI/Anthropic usage adapter. Raw usage and estimated provenance are retained. The optional `jev` dependency is locked but not imported by the fake workflow.
+Pydantic contracts keep candidates, policies, usage, rates and evaluation results outside provider SDKs. Token input categories are disjoint, reasoning is a subset of output, and decimal cost calculation does not round until display. The generic inclusive-input constructor requires known disjoint cache categories. The live adapters additionally normalize provider-specific usage and retain raw responses. The optional `jev` SDK dependency is locked; the current adapters use direct HTTP so every request is observable without SDK retries.
 
 Still required before a meaningful pilot:
 
-- Approved/frozen CMTO sources; configuration-driven generation and atomic rubric; real JEV and one LLM adapter with recorded-response fixtures and provider-specific price/usage normalization.
+- Approved/frozen CMTO sources; configuration-driven generation and atomic rubric; live verification of real adapters and recorded-response fixtures. Current tests use constructed response fixtures, not recorded live results.
 - Semantic redundancy selection, audited duplicate decisions and coverage quotas. Current selection uses exact normalized stem/options fingerprints plus a count target; it does not establish semantic variety.
 - Blinded audit packets, label import/adjudication, cohort-separated quality metrics and uncertainty intervals. Approval export is not a blinded audit export.
 - Deadline/spend caps, per-provider concurrency/rate limits, real backoff, standalone-arm elapsed-time measurement and time-to-target reporting. Fake arms are interleaved; their latencies are not real-provider benchmarks.
-- Richer typed event payload schemas, external artifact bundles, durable export intents/recovery, billing corrections/reconciliation, separate cache-duration pricing and complete coverage/stop events. Current exports record completion after writing; a crash in that gap can leave an unjournaled file, which is never overwritten automatically.
+- Richer typed event payload schemas, external artifact bundles, durable export intents/recovery, billing corrections/reconciliation, and complete coverage/stop events. Live adapters distinguish cache-duration pricing, but reconciliation against actual bills remains pending. Current exports record completion after writing; a crash in that gap can leave an unjournaled file, which is never overwritten automatically.
 - A live TUI, animated replay controls, and human-readable benchmark report. Current commands return JSON and JSONL.
 
 These limits are intentional and visible; successful fake execution is not evidence of quality or cost savings.

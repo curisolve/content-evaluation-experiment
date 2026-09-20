@@ -68,6 +68,7 @@ class Usage(Frozen):
     reasoning: int | None = Field(default=None, ge=0)
     provenance: Literal["provider_reported", "estimated"] = "estimated"
     raw: dict[str, JsonValue] = Field(default_factory=dict)
+    cache_write_1h: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def check_reasoning(self) -> Self:
@@ -95,13 +96,17 @@ class Usage(Frozen):
 
     @property
     def input_total(self) -> int:
-        return self.uncached_input + self.cache_read + self.cache_write
+        return self.uncached_input + self.cache_read + self.cache_write + self.cache_write_1h
 
 
 class RateCard(Frozen):
     id: str
     currency: Literal["USD"] = "USD"
-    provenance: Literal["synthetic_fixture"] = "synthetic_fixture"
+    provenance: Literal["synthetic_fixture", "published_snapshot"] = "synthetic_fixture"
+    source_url: str | None = None
+    retrieved_on: str | None = None
+    model: str | None = None
+    cache_write_1h: Decimal = Field(default=Decimal(0), ge=0)
     uncached_input: Decimal = Field(ge=0)
     cache_read: Decimal = Field(ge=0)
     cache_write: Decimal = Field(ge=0)
@@ -115,6 +120,7 @@ class RateCard(Frozen):
                 self.uncached_input * usage.uncached_input,
                 self.cache_read * usage.cache_read,
                 self.cache_write * usage.cache_write,
+                self.cache_write_1h * usage.cache_write_1h,
                 self.output * usage.output,
             ),
             Decimal(0),
@@ -152,7 +158,8 @@ class Policy(Frozen):
 
 class Manifest(Frozen):
     version: Literal[1] = 1
-    mode: Literal["fake-demo"] = "fake-demo"
+    mode: Literal["fake-demo", "live-smoke"] = "fake-demo"
+    provider_config: dict[str, JsonValue] = Field(default_factory=dict)
     seed: int = 7
     count: int = Field(default=12, ge=1, le=1000)
     target: int = Field(default=5, ge=1, le=1000)
@@ -179,6 +186,15 @@ class Manifest(Frozen):
     def check_rates(self) -> Self:
         if set(self.rates) != set(ARMS):
             raise ValueError("both arms need frozen rate cards")
+        if self.mode == "live-smoke":
+            if self.count > 5 or self.max_attempts != 1:
+                raise ValueError(
+                    "live smoke runs permit at most five inputs and one attempt per arm"
+                )
+            if not self.provider_config or any(
+                card.provenance != "published_snapshot" for card in self.rates.values()
+            ):
+                raise ValueError("live smoke runs require explicit providers and published rates")
         return self
 
 

@@ -1,13 +1,17 @@
 """JSON-first commands; fake demo never accesses the network."""
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
-from content_eval.models import Event, Manifest, canonical, digest
+from content_eval.live import LiveConfig, LiveEvaluator, credential_status, smoke_manifest
+from content_eval.models import Arm, Event, Manifest, canonical, digest
 from content_eval.projection import project
+from content_eval.providers import Evaluator
 from content_eval.storage import Store
 from content_eval.workflow import run
 
@@ -18,6 +22,84 @@ RunID = Annotated[str, typer.Argument(help="Run identifier from demo output")]
 
 def emit(value: object) -> None:
     typer.echo(json.dumps(value, indent=2, sort_keys=True))
+
+
+@app.command("check-providers")
+def check_providers() -> None:
+    """Report credential presence only; no network calls or secret values."""
+    emit({"credentials_present": credential_status(), "network_calls": 0})
+
+
+def execute_live(manifest: Manifest, db: Path, run_id: str | None = None) -> None:
+    expected = smoke_manifest(
+        LiveConfig.model_validate(manifest.provider_config["llm"]), manifest.count
+    )
+    if expected != manifest:
+        raise ValueError("live manifest does not match the current versioned smoke configuration")
+    # Disable proxy inheritance and redirects to keep keys at the intended direct endpoints.
+    with httpx.Client(trust_env=False, follow_redirects=False) as client:
+        adapters: dict[Arm, Evaluator] = {
+            "llm": LiveEvaluator(
+                LiveConfig.model_validate(manifest.provider_config["llm"]), client
+            ),
+            "jev": LiveEvaluator(
+                LiveConfig.model_validate(manifest.provider_config["jev"]), client
+            ),
+        }
+        with Store(db) as store:
+            completed = run(store, manifest, run_id, evaluators=adapters)
+            emit(project(store.events(completed)))
+
+
+@app.command("live-smoke")
+def live_smoke(
+    llm: str = "anthropic",
+    model: str | None = None,
+    count: int = 1,
+    db: Database = Path("runs/live.sqlite"),
+    execute: bool = False,
+) -> None:
+    """Preview a bounded live smoke run; --execute makes paid calls on toy inputs."""
+    try:
+        selected = model or (
+            "claude-opus-5" if llm == "anthropic" else os.environ.get("OPENAI_MODEL", "")
+        )
+        config = LiveConfig.model_validate({"provider": llm, "model": selected})
+        manifest = smoke_manifest(config, count)
+        if not execute:
+            emit(
+                {
+                    "manifest": manifest.model_dump(mode="json"),
+                    "network_calls": 0,
+                    "maximum_calls_if_executed": count * 2,
+                }
+            )
+            return
+        execute_live(manifest, db)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("live-resume")
+def live_resume(
+    run_id: RunID,
+    db: Database = Path("runs/live.sqlite"),
+    execute: bool = False,
+) -> None:
+    """Inspect a live run; --execute resumes remaining work using current local keys."""
+    with Store(db) as store:
+        events = store.events(run_id)
+        summary = project(events)
+        manifest = Manifest.model_validate(events[0].payload["manifest"])
+    if manifest.mode != "live-smoke":
+        raise typer.BadParameter("use resume for a fake run")
+    if not execute or summary["status"] == "completed":
+        emit(summary)
+        return
+    try:
+        execute_live(manifest, db, run_id)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command("runs")

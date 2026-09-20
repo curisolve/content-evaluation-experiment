@@ -21,20 +21,24 @@ def project(events: list[Event]) -> dict[str, Any]:
             raise ValueError("journal sequence, run ID or hash chain mismatch")
         previous = event.event_hash
     manifest = Manifest.model_validate(events[0].payload["manifest"])
-    if digest(manifest.model_dump(mode="json")) != events[0].payload["manifest_hash"]:
+    if digest(events[0].payload["manifest"]) != events[0].payload["manifest_hash"]:
         raise ValueError("manifest hash mismatch")
     report: dict[str, Any] = {
         "report_version": 1,
         "run_id": events[0].run_id,
-        "mode": "fake-demo",
-        "warning": "Synthetic judgments, tokens and prices; no quality or savings evidence.",
+        "mode": manifest.mode,
+        "warning": (
+            "Synthetic judgments, tokens and prices; no quality or savings evidence."
+            if manifest.mode == "fake-demo"
+            else "Live API smoke test; synthetic arithmetic, not CMTO quality or savings evidence."
+        ),
         "manifest_hash": events[0].payload["manifest_hash"],
         "status": "running",
         "generated": 0,
         "valid": 0,
         "invalid": 0,
         "audited_quality": None,
-        "actual_billed_usd": "0",
+        "actual_billed_usd": "0" if manifest.mode == "fake-demo" else None,
         "arms": {},
     }
     for arm in ARMS:
@@ -106,7 +110,7 @@ def project(events: list[Event]) -> dict[str, Any]:
                 stats["input_tokens"] += usage.input_total
                 stats["output_tokens"] += usage.output
                 stats["cache_read_tokens"] += usage.cache_read
-                stats["cache_write_tokens"] += usage.cache_write
+                stats["cache_write_tokens"] += usage.cache_write + usage.cache_write_1h
                 if usage.reasoning is None:
                     stats["unknown_reasoning_attempts"] += 1
                 else:

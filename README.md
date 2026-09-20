@@ -1,6 +1,6 @@
 # Content evaluation experiment
 
-Status: runnable offline CLI foundation, September 20, 2026. Real provider adapters, subject/source approval, and pilot calibration remain pending.
+Status: runnable offline CLI plus opt-in real-provider smoke adapters, September 20, 2026. Real account access has not been exercised; CMTO source approval and pilot calibration remain pending.
 
 How quickly and cheaply can we identify enough high-quality, varied MCQs to send for final human approval?
 
@@ -11,6 +11,7 @@ The evaluation must distinguish **rubric passes** from **independently verified 
 ## Documents
 
 - [Run the offline CLI and development checks](docs/development.md)
+- [Configure JEV, Opus 5, and GPT-5.6 API access](docs/providers.md)
 
 - [Engineering design](design.md)
 - [Architecture and flow](docs/architecture.md), with an editable [Excalidraw diagram](docs/architecture.excalidraw)
@@ -89,6 +90,7 @@ The foundation uses Python >=3.14, `uv`, Pydantic v2, Typer, SQLite, pytest, ruf
 | Subject and source inventory | Drafts available; owner review and source freeze pending |
 | Simplified experiment and event contract | Captured, including diagrams, token/cost accounting, and replay requirements; the initial implementation follows a documented subset |
 | CLI, storage, fake filters, event replay | Initial slice implemented: `src/content_eval/`, `tests/test_foundation.py`, locked dependencies and CI. See [development guide](docs/development.md) for commands and remaining contract work. |
+| Real-provider adapters and usage accounting | Direct HTTP adapters and mocked contracts available for JEV, Opus 5 and GPT-5.6 variants. Live authentication and responses remain unverified; smoke commands preview unless explicitly executed. |
 | Source freeze, rubric, real adapters, diversity selector | Pending; resolve source effective dates and snapshots before generation |
 | Development pilot and blinded audit | Pending; proposed 60 inputs plus 15 independent second reviews |
 | Frozen held-out evaluation and report | Pending; set sample size, targets, budgets, and quality gates from pilot evidence |

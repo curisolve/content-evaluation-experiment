@@ -11,14 +11,32 @@ from content_eval.models import Arm, Candidate, Evaluation, Frozen, Manifest, Us
 class ProviderResult(Frozen):
     model: str
     evaluation: Evaluation
-    usage: Usage
+    usage: Usage | None
+    request_id: str | None = None
+    raw_response: dict[str, JsonValue] = {}
+    pricing_applicable: bool = True
 
 
 class ProviderError(Exception):
-    def __init__(self, category: str, transient: bool = False) -> None:
+    def __init__(
+        self,
+        category: str,
+        transient: bool = False,
+        *,
+        usage: Usage | None = None,
+        returned_model: str | None = None,
+        request_id: str | None = None,
+        raw_response: dict[str, JsonValue] | None = None,
+        pricing_applicable: bool = False,
+    ) -> None:
         super().__init__(category)
         self.category = category
         self.transient = transient
+        self.usage = usage
+        self.returned_model = returned_model
+        self.request_id = request_id
+        self.raw_response = raw_response or {}
+        self.pricing_applicable = pricing_applicable
 
 
 class Evaluator(Protocol):
