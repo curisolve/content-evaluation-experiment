@@ -222,6 +222,8 @@ EventType = Literal[
     "decision.recorded",
     "selection.recorded",
     "export.completed",
+    "audit.packet.created",
+    "audit.labels.imported",
     "generation.started",
     "generation.succeeded",
     "generation.failed",

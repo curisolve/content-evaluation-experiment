@@ -56,7 +56,7 @@ Still required before a meaningful pilot:
 
 - Independent CMTO source review and live validation of the scoped collector; recorded-response fixtures. Source extraction, configuration-driven generation and atomic rubric wiring now exist, but their tests use constructed responses, not live CMTO results.
 - Semantic redundancy selection, audited duplicate decisions and coverage quotas. Current selection uses exact normalized stem/options fingerprints plus a count target; it does not establish semantic variety.
-- Blinded audit packets, label import/adjudication, cohort-separated quality metrics and uncertainty intervals. Approval export is not a blinded audit export.
+- Reference-label collection, adjudication and uncertainty intervals. Blinded packets, immutable item-level label import, accuracy/abstention metrics and cohort breakdowns are now available; see [accuracy](accuracy.md). Approval export is not a blinded audit export.
 - Deadline/spend caps, per-provider concurrency/rate limits, real backoff, standalone-arm elapsed-time measurement and time-to-target reporting. Fake arms are interleaved; their latencies are not real-provider benchmarks.
 - Richer typed event payload schemas, external artifact bundles, durable export intents/recovery, billing corrections/reconciliation, and complete coverage/stop events. Live adapters distinguish cache-duration pricing, but reconciliation against actual bills remains pending. Current exports record completion after writing; a crash in that gap can leave an unjournaled file, which is never overwritten automatically.
 - A live TUI, animated replay controls, and human-readable benchmark report. Current commands return JSON and JSONL.

@@ -87,7 +87,7 @@ def project(events: list[Event]) -> dict[str, Any]:
         p = event.payload
         if event.event_type == "candidate.prepared":
             prepared += 1
-        if event.event_type != "export.completed":
+        if event.event_type != "export.completed" and not event.event_type.startswith("audit."):
             start, _ = sessions.get(event.session_id, (event.elapsed_ns, event.elapsed_ns))
             sessions[event.session_id] = (start, event.elapsed_ns)
         if event.event_type == "candidate.generated":
@@ -207,6 +207,41 @@ def project(events: list[Event]) -> dict[str, Any]:
         stats["target_reached"] = count >= manifest.target
         stats["target_gap"] = max(0, manifest.target - count)
     if manifest.mode == "cmto-development":
+        from content_eval.audit import accuracy
+
+        has_pool = any(e.event_type == "pool.frozen" for e in events)
+        for arm in ARMS:
+            measured = accuracy(events, arm) if has_pool else None
+            report["arms"][arm]["accuracy"] = measured["accuracy"] if measured else None
+            report["arms"][arm]["accuracy_details"] = measured
+            report["arms"][arm]["accuracy_by_population"] = {
+                kind: accuracy(events, arm, population=kind) if has_pool else None
+                for kind in ("ordinary", "defect", "paraphrase")
+            }
+            provider = manifest.provider_config.get(arm)
+            report["arms"][arm]["model"] = (
+                provider.get("model") if isinstance(provider, dict) else None
+            )
+            report["arms"][arm]["proxy_accuracy_details"] = (
+                accuracy(events, arm, reference_type="proxy") if has_pool else None
+            )
+        report["accuracy_note"] = (
+            "Independent human reference labels required; model agreement and seeded labels "
+            "are not accuracy. Abstentions earn no credit; see denominators and decision coverage."
+        )
+        if any(
+            e.event_type == "audit.labels.imported" and e.payload["reference_type"] == "human"
+            for e in events
+        ):
+            report["audited_quality"] = {
+                "status": "independent_reference_labels_imported_not_final_approval",
+                "qualification": "reviewer-attested, not independently verified",
+            }
+        pool_reference = manifest.provider_config.get("evaluation_pool")
+        if isinstance(pool_reference, dict):
+            report["evaluation_pool"] = {
+                k: v for k, v in pool_reference.items() if k not in {"inputs", "input_hashes"}
+            }
         if report["status"] == "completed" and report.get("stop_reason") != "fixed_pool_exhausted":
             report["status"] = "stopped"
         report["collection_complete"] = report.get("stop_reason") == "fixed_pool_exhausted"
@@ -255,6 +290,10 @@ def project(events: list[Event]) -> dict[str, Any]:
             "All-item ratios mix ordinary/challenge populations and are not operational yield. "
             "Admission spend guard is estimated, not a provider billing limit."
         )
+        if isinstance(pool_reference, dict):
+            report["cost_note"] += (
+                " Reevaluation costs cover this run's new calls only, excluding parent charges."
+            )
         continuation = manifest.provider_config.get("continuation")
         if isinstance(continuation, dict):
             report["continuation"] = {

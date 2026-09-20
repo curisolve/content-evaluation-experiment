@@ -9,7 +9,8 @@ from typing import Annotated
 import httpx
 import typer
 
-from content_eval.cmto import continuation_manifest, make_manifest
+from content_eval.audit import export_packet, import_labels
+from content_eval.cmto import continuation_manifest, make_manifest, reevaluation_manifest
 from content_eval.cmto import execute as execute_cmto
 from content_eval.live import LiveConfig, LiveEvaluator, credential_status, smoke_manifest
 from content_eval.models import Arm, Event, Manifest, canonical, digest
@@ -64,8 +65,10 @@ def cmto_pack(
 @app.command("cmto-run")
 def cmto_run(
     max_estimated_usd: Annotated[str, typer.Option("--max-estimated-usd")],
-    llm: str = "anthropic",
+    llm: str = "openai",
     model: str | None = None,
+    generator: str = "anthropic",
+    generator_model: str = "claude-opus-5",
     subject: Path = Path("subjects/cmto_consent_boundaries_v1.json"),
     artifacts: Path = Path("source-artifacts/cmto-2026-09-20"),
     reviewed_pack_hash: str | None = None,
@@ -95,6 +98,13 @@ def cmto_run(
             max_calls=max_calls,
             threshold=threshold,
             generation_timeout_seconds=generation_timeout_seconds,
+            generator=LiveConfig.model_validate(
+                {
+                    "provider": generator,
+                    "model": generator_model,
+                    "max_output_tokens": 4096,
+                }
+            ),
         )
         if not execute:
             emit(
@@ -102,7 +112,8 @@ def cmto_run(
                     "mode": manifest.mode,
                     "pack_hash": pack["pack_hash"],
                     "manifest_hash": digest(manifest.model_dump(mode="json")),
-                    "generator_and_llm": selected,
+                    "generator": generator_model,
+                    "llm_reviewer": selected,
                     "jev": "jev-1.13.0",
                     "items": 20,
                     "maximum_calls": max_calls,
@@ -187,6 +198,99 @@ def cmto_continue(
             emit(project(store.events(child_id)))
     except (ValueError, OSError, KeyError, InvalidOperation) as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("cmto-reevaluate")
+def cmto_reevaluate(
+    run_id: RunID,
+    max_estimated_usd: Annotated[str, typer.Option("--max-estimated-usd")],
+    model: str | None = None,
+    db: Database = Path("runs/cmto.sqlite"),
+    execute: bool = False,
+) -> None:
+    """Review the saved Opus pool using OpenAI and JEV; never regenerate inputs."""
+    try:
+        config = LiveConfig(
+            provider="openai",
+            model=model or os.environ.get("OPENAI_MODEL", ""),
+            max_output_tokens=4096,
+        )
+        with Store(db, read_only=True) as store:
+            manifest = reevaluation_manifest(store, run_id, config, Decimal(max_estimated_usd))
+        if not execute:
+            emit(
+                {
+                    "network_calls": 0,
+                    "maximum_calls": 40,
+                    "reused_candidates": 20,
+                    "generator": manifest.provider_config["generator"],
+                    "llm_reviewer": config.model,
+                    "jev": "jev-1.13.0",
+                    "generation_calls": 0,
+                    "parent_run_id": run_id,
+                    "manifest_hash": digest(manifest.model_dump(mode="json")),
+                    "estimated_spend_guard_usd": max_estimated_usd,
+                }
+            )
+            return
+        with Store(db) as store, httpx.Client(trust_env=False, follow_redirects=False) as client:
+            child = execute_cmto(store, manifest, client)
+            emit(project(store.events(child)))
+    except (ValueError, OSError, KeyError, InvalidOperation) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("export-audit")
+def export_audit(
+    run_id: RunID,
+    output: Path,
+    db: Database = Path("runs/cmto.sqlite"),
+) -> None:
+    """Export a blinded full-pool packet; never include arm outcomes or construction labels."""
+    try:
+        with Store(db) as store:
+            packet = export_packet(store, run_id, output)
+        emit({"packet_id": packet, "output": str(output), "network_calls": 0})
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("import-audit")
+def import_audit(
+    run_id: RunID,
+    labels: Path,
+    db: Database = Path("runs/cmto.sqlite"),
+) -> None:
+    """Append independent reference labels, preserving immutable candidates and prior labels."""
+    try:
+        with Store(db) as store:
+            count = import_labels(store, run_id, labels)
+            emit({"labels_imported": count, "report": project(store.events(run_id))})
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("compare")
+def compare(run_id: RunID, db: Database = Path("runs/cmto.sqlite")) -> None:
+    """Compact evaluator comparison; accuracy stays N/A until independent labels exist."""
+    with Store(db, read_only=True) as store:
+        report = project(store.events(run_id))
+    typer.echo("Arm | Eval cost USD | Median ms | Accuracy | Labelled / pool | Unresolved")
+    typer.echo("--- | ---: | ---: | ---: | ---: | ---:")
+    for arm, stats in report["arms"].items():
+        measured = stats.get("accuracy_details") or {}
+        score = measured.get("accuracy")
+        display = "N/A" if score is None else f"{score:.1%}"
+        typer.echo(
+            f"{stats.get('model') or arm} | {stats['estimated_cost_usd']} | "
+            f"{stats['attempt_latency_p50_ms']} | "
+            f"{display} | {measured.get('labelled_evaluated', 0)}/{measured.get('pool_size', 0)} | "
+            f"{stats['unresolved']}"
+        )
+    typer.echo(
+        "Accuracy requires independent human labels; abstentions earn no correctness credit."
+    )
+    typer.echo("Partial labels describe only the audited subset, not full-pool accuracy.")
 
 
 def execute_live(manifest: Manifest, db: Path, run_id: str | None = None) -> None:

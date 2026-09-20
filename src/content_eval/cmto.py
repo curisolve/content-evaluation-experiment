@@ -80,9 +80,14 @@ def make_manifest(
     max_calls: int = MAX_CALLS,
     threshold: float = 0.9,
     generation_timeout_seconds: float | None = None,
+    generator: LiveConfig | None = None,
 ) -> Manifest:
     if llm.provider == "jev":
         raise ValueError("the generator/LLM arm must be anthropic or openai")
+    if generator is not None:
+        if generator.provider == "jev" or generator.model == llm.model:
+            raise ValueError("generator and LLM reviewer must be different generative models")
+        rate_card(generator)
     if pack.get("pack_hash") != digest(
         {key: value for key, value in pack.items() if key != "pack_hash"}
     ):
@@ -136,6 +141,12 @@ def make_manifest(
             dict[str, JsonValue],
             {
                 "llm": llm.model_dump(mode="json"),
+                **({"generator": generator.model_dump(mode="json")} if generator else {}),
+                **(
+                    {"generator_rate": rate_card(generator).model_dump(mode="json")}
+                    if generator
+                    else {}
+                ),
                 **(
                     {"generation_timeout_seconds": generation_timeout_seconds}
                     if generation_timeout_seconds is not None
@@ -275,6 +286,7 @@ def _generate_pool(
     budget: Budget,
 ) -> None:
     cfg = cast(dict[str, Any], manifest.provider_config)
+    generation_rate = rate_card(generator.config)
     generated: dict[str, dict[str, Any]] = {
         item["id"]: item for item in cfg.get("continuation", {}).get("prepared", [])
     }
@@ -323,7 +335,7 @@ def _generate_pool(
                     "request_payload": payload,
                     "request_hash": digest(payload),
                     "requested_model": generator.model,
-                    "rate_card": manifest.rates["llm"].model_dump(mode="json"),
+                    "rate_card": generation_rate.model_dump(mode="json"),
                 },
                 candidate_id=cid,
                 operation_id=f"generate:{cid}",
@@ -333,7 +345,7 @@ def _generate_pool(
             try:
                 result = generator.complete(payload)
             except ProviderError as exc:
-                cost = manifest.rates["llm"].cost(exc.usage) if exc.pricing_applicable else None
+                cost = generation_rate.cost(exc.usage) if exc.pricing_applicable else None
                 store.append(
                     run_id,
                     "generation.failed",
@@ -350,7 +362,7 @@ def _generate_pool(
                     attempt_id=attempt,
                 )
                 raise StopRun("generation_failed_no_retry") from exc
-            cost = manifest.rates["llm"].cost(result.usage) if result.pricing_applicable else None
+            cost = generation_rate.cost(result.usage) if result.pricing_applicable else None
             # Persist the response before parsing; even invalid output can be billed.
             store.append(
                 run_id,
@@ -429,6 +441,12 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         raise ValueError("expected CMTO development manifest")
     cfg = cast(dict[str, Any], manifest.provider_config)
     llm = LiveConfig.model_validate(cfg["llm"])
+    generation_config = LiveConfig.model_validate(cfg.get("generator", cfg["llm"]))
+    if generation_config.model == llm.model:
+        raise ValueError(
+            "same-model generation/review is disabled; choose a different reviewer "
+            "or reevaluate a saved pool"
+        )
     expected = make_manifest(
         cfg["pack"],
         llm,
@@ -436,7 +454,17 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         max_calls=cfg["max_calls"],
         threshold=manifest.policy.threshold,
         generation_timeout_seconds=cfg.get("generation_timeout_seconds"),
+        generator=LiveConfig.model_validate(cfg["generator"]) if "generator" in cfg else None,
     )
+    if "evaluation_pool" in cfg:
+        expected = expected.model_copy(
+            update={
+                "provider_config": {
+                    **expected.provider_config,
+                    "evaluation_pool": cfg["evaluation_pool"],
+                }
+            }
+        )
     if "continuation" in cfg:
         expected = expected.model_copy(
             update={
@@ -460,12 +488,20 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
     }
     generator_config = LiveConfig.model_validate(
         {
-            **llm.model_dump(),
-            "timeout_seconds": cfg.get("generation_timeout_seconds", llm.timeout_seconds),
+            **generation_config.model_dump(),
+            "timeout_seconds": cfg.get(
+                "generation_timeout_seconds", generation_config.timeout_seconds
+            ),
         }
     )
-    generator = LiveEvaluator(generator_config, client, max_input_bytes=MAX_INPUT_BYTES)
+    generator_adapter = (
+        None
+        if "evaluation_pool" in cfg
+        else LiveEvaluator(generator_config, client, max_input_bytes=MAX_INPUT_BYTES)
+    )
     with store.writer():
+        if "evaluation_pool" in cfg:
+            validate_evaluation_pool(store, manifest)
         if "continuation" in cfg:
             validate_continuation(store, manifest)
         run_id = str(uuid4())
@@ -482,7 +518,21 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         )
         budget = Budget(store, run_id, manifest)
         try:
-            _generate_pool(store, run_id, manifest, generator, budget)
+            if "evaluation_pool" in cfg:
+                pool = cfg["evaluation_pool"]
+                store.append(
+                    run_id,
+                    "pool.frozen",
+                    {
+                        "inputs": pool["inputs"],
+                        "input_hashes": pool["input_hashes"],
+                        "parent_run_id": pool["parent_run_id"],
+                        "order": "preserved-from-parent",
+                    },
+                )
+            else:
+                assert generator_adapter is not None
+                _generate_pool(store, run_id, manifest, generator_adapter, budget)
             evaluators: dict[Arm, Evaluator] = {
                 arm: GuardedEvaluator(adapters[arm], budget) for arm in ("llm", "jev")
             }
@@ -560,6 +610,7 @@ def continuation_manifest(
         max_calls=max_calls,
         threshold=old.policy.threshold,
         generation_timeout_seconds=generation_timeout_seconds,
+        generator=LiveConfig.model_validate(cfg["generator"]) if "generator" in cfg else None,
     )
     carry = {
         "parent_run_id": parent_id,
@@ -607,3 +658,61 @@ def validate_continuation(store: Store, manifest: Manifest) -> None:
         child = json.loads(row[0])["payload"]["manifest"]["provider_config"].get("continuation")
         if child and child["parent_run_id"] == carry["parent_run_id"]:
             raise ValueError("parent already has a continuation; inspect/continue that child run")
+
+
+def reevaluation_manifest(
+    store: Store,
+    parent_id: str,
+    llm: LiveConfig,
+    max_estimated_usd: Decimal,
+) -> Manifest:
+    from content_eval.projection import project
+
+    events = store.events(parent_id)
+    report = project(events)
+    if report["mode"] != "cmto-development" or not report["collection_complete"]:
+        raise ValueError("reevaluation requires a completed CMTO pool")
+    old = Manifest.model_validate(events[0].payload["manifest"])
+    cfg = cast(dict[str, Any], old.provider_config)
+    generator = LiveConfig.model_validate(cfg.get("generator", cfg["llm"]))
+    pool = next(e.payload for e in events if e.event_type == "pool.frozen")
+    inputs = pool["inputs"]
+    if not isinstance(inputs, list) or len(inputs) != 20:
+        raise ValueError("expected the complete 20-item pool")
+    if [digest(item) for item in inputs] != pool["input_hashes"]:
+        raise ValueError("parent pool hash mismatch")
+    for item in inputs:
+        validate_candidate(Candidate.model_validate(item), old)
+    manifest = make_manifest(
+        cfg["pack"],
+        llm,
+        max_estimated_usd,
+        generator=generator,
+        max_calls=40,
+        threshold=old.policy.threshold,
+    )
+    provenance = {
+        "parent_run_id": parent_id,
+        "parent_manifest_hash": events[0].payload["manifest_hash"],
+        "pool_hash": digest(inputs),
+        "inputs": inputs,
+        "input_hashes": pool["input_hashes"],
+        "generator_model": generator.model,
+    }
+    return manifest.model_copy(
+        update={
+            "provider_config": {**manifest.provider_config, "evaluation_pool": provenance},
+        }
+    )
+
+
+def validate_evaluation_pool(store: Store, manifest: Manifest) -> None:
+    cfg = cast(dict[str, Any], manifest.provider_config)
+    expected = reevaluation_manifest(
+        store,
+        cfg["evaluation_pool"]["parent_run_id"],
+        LiveConfig.model_validate(cfg["llm"]),
+        Decimal(cfg["max_estimated_usd"]),
+    )
+    if expected != manifest:
+        raise ValueError("evaluation pool differs from the verified parent")

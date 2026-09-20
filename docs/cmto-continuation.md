@@ -5,6 +5,12 @@ This creates a linked child run and never edits the parent journal. It reuses
 validated `candidate.prepared` records byte-for-byte and preserves the frozen
 subject, sources, rubric, generator/LLM model, evaluator configuration and prices.
 
+New execution now requires different generator and reviewer models. Historical
+same-model runs remain readable but cannot be continued with the same reviewer.
+For the already completed Opus pool, use [saved-pool reevaluation](accuracy.md)
+with GPT-5.6 instead. The historical timeout example below documents the original
+continuation accounting, not an instruction to restart that old run.
+
 Preview is read-only and needs no keys:
 
 ```bash

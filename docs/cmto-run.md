@@ -32,21 +32,26 @@ After review, substitute the hash emitted by `cmto-pack`:
 
 ```bash
 uv run --env-file .env content-eval cmto-run \
-  --llm anthropic --max-estimated-usd 5 \
+  --llm openai --generator anthropic --generator-model claude-opus-5 --max-estimated-usd 5 \
   --reviewed-pack-hash PACK_HASH --execute --db runs/cmto.sqlite
 ```
 
 For OpenAI use `--llm openai --model YOUR_EXACT_OPENAI_MODEL`, or set
 `OPENAI_MODEL` in the loaded environment. Existing supported model/rate snapshots
-are unchanged. Both the chosen LLM credential and JEV credential must be present
-before generation starts. No network is used by preview.
+are unchanged. Generator, reviewer, and JEV credentials must all be present before
+fresh generation starts. Reevaluation needs only reviewer and JEV credentials.
+No network is used by preview.
 
 A new command invocation generates a new pool. Do **not** treat separate
 Anthropic/OpenAI invocations as a three-way same-pool comparison. This slice
-compares JEV against one chosen LLM on identical inputs within a run. Reusing a
-frozen pool with a second LLM is still follow-on work.
+compares JEV against one chosen LLM on identical inputs within a run. Use
+`cmto-reevaluate` to review an existing frozen pool without regeneration.
 
-The generator uses the selected LLM. Code allocates twelve ordinary slots,
+The generator is configured independently from the reviewer: by default Opus
+generates and the configured OpenAI model reviews. Same-model generation/review
+is rejected. See [independent review and accuracy](accuracy.md), including a
+zero-generation command for reevaluating an existing completed pool.
+Code allocates twelve ordinary slots,
 creates four intended wrong-key variants deterministically, and requests four
 paraphrases of designated parents. Family, cohort and construction labels are
 retained in the journal but hidden from evaluator requests. Intended defects and
@@ -110,11 +115,12 @@ packet or an artifact to commit.
 Reports show generator cost separately, per-arm evaluation cost, and the actual
 experiment's estimated total (shared generation counted once). Unknown accounting
 remains unknown. Ordinary, defect, and paraphrase counts are separate; combined
-per-item ratios are not production-yield estimates. Audited quality and actual
-billed charges stay null.
+per-item ratios are not production-yield estimates. Accuracy remains unmeasured
+until independent reference labels are imported; actual billed charges stay null.
 
 Selection is still exact-text-only and provisional. Semantic redundancy and
 coverage quotas are not implemented, so selected count is not verified diverse
-yield. CMTO approval export is deliberately blocked. Next steps are a blinded
-audit packet/label importer, calibration, same-pool second-LLM evaluation and
-semantic-duplicate selection; then a fresh held-out comparison.
+yield. CMTO approval export is deliberately blocked. Blinded audit packets, label
+import, and same-pool reevaluation are available in the [accuracy guide](accuracy.md).
+Calibration, semantic-duplicate selection, adjudication, and a fresh held-out
+comparison remain follow-on work.

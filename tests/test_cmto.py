@@ -41,6 +41,12 @@ def manifest(llm_provider: str = "anthropic", **kwargs: Any) -> Any:
             }
         ),
         Decimal("100"),
+        generator=LiveConfig.model_validate(
+            {
+                "provider": "openai" if llm_provider == "anthropic" else "anthropic",
+                "model": "gpt-5.6-sol" if llm_provider == "anthropic" else "claude-opus-5",
+            }
+        ),
         **kwargs,
     )
 
@@ -144,6 +150,7 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-test-key")
     monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-sol")
 
 
 def test_allocation() -> None:
@@ -257,6 +264,7 @@ def test_spend_guard_prevents_first_call(tmp_path: Path) -> None:
         fixture_pack(),
         LiveConfig(provider="anthropic", model="claude-opus-5"),
         Decimal("0.000001"),
+        generator=LiveConfig(provider="openai", model="gpt-5.6-sol"),
     )
     with httpx.Client(transport=transport(calls)) as client, Store(tmp_path / "run.db") as store:
         mid = execute(store, m, client)
@@ -577,6 +585,7 @@ def test_read_only_preview_and_legacy_stop_status(tmp_path: Path) -> None:
             with store.writer():
                 pass
     assert path.read_bytes() == before
+
     result = CliRunner().invoke(
         app,
         [
@@ -593,3 +602,177 @@ def test_read_only_preview_and_legacy_stop_status(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["network_calls"] == 0
     assert path.read_bytes() == before
+
+
+def test_same_model_rejected_and_generator_cost_separate(tmp_path: Path) -> None:
+    config = LiveConfig(provider="anthropic", model="claude-opus-5")
+    with pytest.raises(ValueError, match="different"):
+        make_manifest(fixture_pack(), config, Decimal(5), generator=config)
+    old = make_manifest(fixture_pack(), config, Decimal(5))
+    calls: list[dict[str, Any]] = []
+    with Store(tmp_path / "run.db") as store, httpx.Client(transport=transport(calls)) as client:
+        with pytest.raises(ValueError, match="same-model"):
+            execute(store, old, client)
+        assert not calls
+        mid = execute(store, manifest(), client)
+        report = project(store.events(mid))
+        assert Decimal(report["generation"]["estimated_cost_usd"]) == Decimal("0.0224")
+        assert all(call["model"] == "gpt-5.6-sol" for call in calls[:16])
+
+
+def test_reevaluate_saved_pool_without_generator_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from content_eval.cmto import reevaluation_manifest
+
+    path = tmp_path / "run.db"
+    with Store(path) as store, httpx.Client(transport=transport([])) as client:
+        parent = execute(store, manifest("openai"), client)
+        prior = store.events(parent)
+        m = reevaluation_manifest(
+            store,
+            parent,
+            LiveConfig(provider="openai", model="gpt-5.6-sol"),
+            Decimal(5),
+        )
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        calls: list[dict[str, Any]] = []
+        with httpx.Client(transport=transport(calls)) as reviewer_client:
+            child = execute(store, m, reviewer_client)
+        assert len(calls) == 40
+        assert store.events(parent) == prior
+        child_events = store.events(child)
+        parent_pool = next(e.payload["inputs"] for e in prior if e.event_type == "pool.frozen")
+        child_pool = next(
+            e.payload["inputs"] for e in child_events if e.event_type == "pool.frozen"
+        )
+        assert parent_pool == child_pool
+        report = project(child_events)
+        assert report["generation"]["attempts"] == 0
+        assert report["arms"]["llm"]["model"] == "gpt-5.6-sol"
+        assert report["arms"]["llm"]["accuracy"] is None
+        assert report["arms"]["jev"]["accuracy"] is None
+        assert report["evaluation_pool"]["generator_model"] == "claude-opus-5"
+
+
+def labelled_packet(path: Path, *, reference_type: str = "human") -> dict[str, Any]:
+    packet = json.loads(path.read_text())
+    packet.update(
+        {
+            "reviewer_id": "test-reviewer",
+            "qualification": "synthetic fixture only",
+            "reference_type": reference_type,
+            "independent": True,
+        }
+    )
+    for item, verdict in zip(
+        packet["items"],
+        ("acceptable", "rejectable", "revisable", "unresolved"),
+        strict=False,
+    ):
+        item.update({"disposition": verdict, "notes": "Fixture reference.", "review_seconds": 1})
+    return packet
+
+
+def test_blinded_audit_accuracy_abstentions_and_replay(tmp_path: Path) -> None:
+    from content_eval.audit import export_packet, import_labels
+
+    normal = transport([])
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "state" in body:
+            return httpx.Response(
+                200,
+                json={
+                    "model": body["model"],
+                    "usage": {"input_tokens": 100, "output_tokens": 40},
+                    "answers": {key: {"type": "noul", "noul": 0.5} for key in body["questions"]},
+                },
+            )
+        return normal.handle_request(request)
+
+    path = tmp_path / "packet.json"
+    with Store(tmp_path / "run.db") as store:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            mid = execute(store, manifest("openai"), client)
+        before = project(store.events(mid))
+        export_packet(store, mid, path)
+        exported = json.loads(path.read_text())
+        assert set(exported).isdisjoint({"arm", "decisions", "cohort", "mapping"})
+        assert all(
+            set(item["candidate"]).isdisjoint({"id", "family_id", "cohort"})
+            for item in exported["items"]
+        )
+        packet = labelled_packet(path)
+        path.write_text(json.dumps(packet))
+        assert import_labels(store, mid, path) == 4
+        events = store.events(mid)
+        after = project(events)
+        assert after["observed_active_elapsed_ms"] == before["observed_active_elapsed_ms"]
+        llm = after["arms"]["llm"]["accuracy_details"]
+        jev = after["arms"]["jev"]["accuracy_details"]
+        assert llm["accuracy"] == 1 / 3
+        assert llm["pass_precision"] == 1 / 3
+        assert llm["acceptable_recall"] == 1
+        assert llm["labelled_evaluated"] == 3
+        assert llm["reference_unresolved"] == 1
+        assert llm["false_accepts"] == 2
+        assert jev["accuracy"] == 0
+        assert jev["abstentions"] == 3
+        assert jev["decision_coverage"] == 0
+        assert jev["decided_accuracy"] is None
+        assert (
+            sum(
+                stats["labelled_evaluated"]
+                for stats in after["arms"]["llm"]["accuracy_by_population"].values()
+            )
+            == 3
+        )
+        assert project([Event.model_validate_json(e.model_dump_json()) for e in events]) == after
+        with pytest.raises(ValueError, match="already exists"):
+            import_labels(store, mid, path)
+        assert store.events(mid) == events
+
+
+@pytest.mark.parametrize("tamper", ["candidate", "source", "independence", "duplicate"])
+def test_audit_rejects_changed_input_or_invalid_provenance(
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    from content_eval.audit import export_packet, import_labels
+
+    path = tmp_path / "packet.json"
+    with Store(tmp_path / "run.db") as store, httpx.Client(transport=transport([])) as client:
+        mid = execute(store, manifest(), client)
+        export_packet(store, mid, path)
+        packet = labelled_packet(path)
+        if tamper == "candidate":
+            packet["items"][0]["candidate"]["stem"] = "changed"
+        elif tamper == "source":
+            packet["source"] = "changed"
+        elif tamper == "independence":
+            packet["independent"] = False
+        else:
+            packet["items"].append(packet["items"][0])
+        path.write_text(json.dumps(packet))
+        before = store.events(mid)
+        with pytest.raises(ValueError):
+            import_labels(store, mid, path)
+        assert store.events(mid) == before
+
+
+def test_proxy_labels_do_not_become_human_accuracy(tmp_path: Path) -> None:
+    from content_eval.audit import export_packet, import_labels
+
+    path = tmp_path / "packet.json"
+    with Store(tmp_path / "run.db") as store, httpx.Client(transport=transport([])) as client:
+        mid = execute(store, manifest(), client)
+        export_packet(store, mid, path)
+        path.write_text(json.dumps(labelled_packet(path, reference_type="proxy")))
+        import_labels(store, mid, path)
+        result = project(store.events(mid))
+        assert result["arms"]["llm"]["accuracy"] is None
+        assert result["arms"]["llm"]["proxy_accuracy_details"]["accuracy"] == 1 / 3
+        assert result["audited_quality"] is None
