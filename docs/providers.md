@@ -1,6 +1,6 @@
 # Provider setup and smoke tests
 
-Work in `projects/worktrees/content-evaluation-experiment/provider-adapters`, branch `feat/provider-adapters`, based on `feat/cli-foundation`. The synchronized `main` checkout is unchanged. No live API calls were made while implementing these adapters.
+The adapters were developed on `feat/provider-adapters`, based on `feat/cli-foundation`. Continue development in a machine-local worktree, keeping synchronized `main` clean. The user subsequently completed both live smoke tests; see [verification evidence](live-smoke-verification.md).
 
 ## Credentials
 
@@ -50,7 +50,7 @@ Every call is preceded by a durable attempt event and followed by a result or er
 
 OpenAI input totals include cache reads/writes; they are subtracted before pricing uncached input. Reasoning is counted within output, not billed again. Anthropic ordinary input, cache reads and cache writes are separate; five-minute and one-hour writes have separate prices. JEV output tokens are recorded with zero output charge. Missing/inconsistent counters remain unknown, with raw usage retained. Refusals and invalid outputs retain usage when supplied and can still incur cost.
 
-An unexpected returned model or OpenAI service tier makes cost unknown rather than applying a potentially wrong rate. Account access and exact response fields still need a live smoke test; constructing fixtures cannot establish those facts. Both input context and standard-rate assumptions are deliberately restricted to this small text-only test.
+An unexpected returned model or OpenAI service tier makes cost unknown rather than applying a potentially wrong rate. The user's two smoke tests verified access and normalized usage for those requests; mocked fixtures alone cannot establish account access. Both input context and standard-rate assumptions are deliberately restricted to this small text-only test.
 
 Use `runs --db runs/live.sqlite` to locate an interrupted run. `live-resume RUN_ID` previews its state; add `--execute` and load local keys to perform any remaining calls. Completed runs are no-ops. Generic `resume` cannot silently replace live adapters with fake ones. A request interrupted after intent remains unknown and is withheld rather than retried. An incompatible saved smoke configuration is rejected rather than silently repriced or reprompted.
 

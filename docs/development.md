@@ -2,7 +2,7 @@
 
 The CLI currently runs synthetic arithmetic fixtures through two fake evaluators. It tests orchestration and accounting, not JEV/LLM accuracy, CMTO content, or provider pricing. Both fake arms intentionally give the same judgments and use synthetic rates. No credentials or network calls are needed to run it after dependency installation.
 
-Opt-in [real-provider smoke adapters](providers.md) are also available. They use the same toy fixtures with actual APIs; mocked tests verify contracts, but no account-specific live verification has been performed. The offline demo remains unchanged.
+Opt-in [real-provider smoke adapters](providers.md) are also available. They use the same toy fixtures with actual APIs. Mocked tests verify contracts, and the user completed both live pairings; see [verification evidence](live-smoke-verification.md). The offline demo remains unchanged.
 
 Use a development worktree, not the synchronized `worksync` checkout.
 
