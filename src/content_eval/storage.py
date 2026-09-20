@@ -15,11 +15,16 @@ from content_eval.models import Arm, Event, EventType, digest
 
 
 class Store:
-    def __init__(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: Path, *, read_only: bool = False) -> None:
+        self.read_only = read_only
+        if not read_only:
+            path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.session_id = str(uuid4())
         self.started = time.monotonic_ns()
+        if read_only:
+            self.db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+            return
         self.db = sqlite3.connect(path, timeout=10)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
@@ -46,6 +51,8 @@ class Store:
 
     @contextmanager
     def writer(self) -> Iterator[None]:
+        if self.read_only:
+            raise ValueError("read-only store cannot acquire a writer")
         # Keep one coordinator per database, including across processes.
         with self.path.with_suffix(self.path.suffix + ".lock").open("a") as lock:
             try:

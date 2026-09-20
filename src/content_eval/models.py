@@ -207,6 +207,7 @@ EventType = Literal[
     "run.created",
     "run.resumed",
     "run.completed",
+    "run.stopped",
     "run.cancelled",
     "run.failed",
     "candidate.generated",

@@ -418,3 +418,178 @@ def test_wrong_dynamic_verdict_keys_retain_billed_usage() -> None:
         assert caught.value.usage is not None
         assert caught.value.usage.output == 50
         assert caught.value.pricing_applicable
+
+
+def stopped_parent(store: Store) -> str:
+    seen = 0
+    calls: list[dict[str, Any]] = []
+    normal = transport(calls)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal seen
+        seen += 1
+        if seen == 3:
+            raise httpx.ReadTimeout("fixture", request=request)
+        return normal.handle_request(request)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        return execute(store, manifest(), client)
+
+
+def plan_continuation(store: Store, parent: str, **kwargs: Any) -> Any:
+    from content_eval.cmto import continuation_manifest
+
+    options = {
+        "max_estimated_usd": Decimal("100"),
+        "max_calls": 57,
+        "generation_timeout_seconds": 120,
+        "acknowledge_uncertain_attempts": True,
+        "unknown_cost_reserve_usd": Decimal("0.25"),
+    }
+    return continuation_manifest(store, parent, **{**options, **kwargs})
+
+
+def test_continuation_reuses_originals_and_preserves_unknown_cost(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    timeouts: list[float] = []
+    normal = transport(calls)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"]["read"])
+        return normal.handle_request(request)
+
+    with Store(tmp_path / "run.db") as store:
+        parent = stopped_parent(store)
+        prior = store.events(parent)
+        assert project(prior)["status"] == "stopped"
+        child_plan = plan_continuation(store, parent)
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            child = execute(store, child_plan, client)
+        assert store.events(parent) == prior
+        assert len(calls) == 54
+        assert timeouts[:14] == [120] * 14
+        assert timeouts[14:] == [30] * 40
+        events = store.events(child)
+        report = project(events)
+        assert report["status"] == "completed"
+        assert report["reused_candidates"] == 2
+        assert report["prepared_candidates"] == 18
+        assert report["frozen_pool_size"] == 20
+        assert report["continuation"]["prior_calls"] == 3
+        assert report["continuation"]["prior_unknown_attempts"] == 1
+        assert not report["experiment_cost_complete"]
+        assert report["generation"]["cost_complete"]
+        known_total = (
+            Decimal(project(prior)["experiment_estimated_cost_usd"])
+            + Decimal(report["generation"]["estimated_cost_usd"])
+            + sum(Decimal(s["estimated_cost_usd"]) for s in report["arms"].values())
+        )
+        assert Decimal(report["experiment_estimated_cost_usd"]) == known_total
+        pool = next(e.payload["inputs"] for e in events if e.event_type == "pool.frozen")
+        by_id = {item["id"]: item for item in pool}
+        for event in prior:
+            if event.event_type == "candidate.prepared":
+                assert by_id[event.candidate_id] == event.payload["candidate"]
+        assert project([Event.model_validate_json(e.model_dump_json()) for e in events]) == report
+        with httpx.Client(transport=transport([])) as client:
+            with pytest.raises(ValueError, match="already has a continuation"):
+                execute(store, child_plan, client)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"acknowledge_uncertain_attempts": False},
+        {"unknown_cost_reserve_usd": Decimal(0)},
+    ],
+)
+def test_continuation_requires_explicit_uncertain_cost_ack(
+    tmp_path: Path,
+    overrides: dict[str, Any],
+) -> None:
+    calls: list[dict[str, Any]] = []
+    with Store(tmp_path / "run.db") as store:
+        parent = stopped_parent(store)
+        count_before = store.db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        plan = plan_continuation(store, parent, **overrides)
+        with httpx.Client(transport=transport(calls)) as client:
+            with pytest.raises(ValueError, match="uncertain prior calls"):
+                execute(store, plan, client)
+        assert not calls
+        assert store.db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == count_before
+
+
+def test_continuation_reserve_counts_against_budget(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    with Store(tmp_path / "run.db") as store:
+        parent = stopped_parent(store)
+        plan = plan_continuation(store, parent, unknown_cost_reserve_usd=Decimal(100))
+        with httpx.Client(transport=transport(calls)) as client:
+            child = execute(store, plan, client)
+        assert not calls
+        report = project(store.events(child))
+        assert report["status"] == "stopped"
+        assert report["stop_reason"] == "estimated_spend_guard"
+        assert not report["experiment_cost_complete"]
+
+
+def test_chained_continuation_carries_originals_and_cumulative_call_cap(tmp_path: Path) -> None:
+    with Store(tmp_path / "run.db") as store:
+        parent = stopped_parent(store)
+        calls: list[dict[str, Any]] = []
+        with httpx.Client(transport=transport(calls)) as client:
+            child = execute(store, plan_continuation(store, parent, max_calls=4), client)
+        assert len(calls) == 1
+        assert project(store.events(child))["stop_reason"] == "call_cap"
+        next_plan = plan_continuation(store, child)
+        carry = next_plan.provider_config["continuation"]
+        assert carry["prior_calls"] == 4
+        assert carry["prior_unknown_attempts"] == 1
+        assert len(carry["prepared"]) == 3
+        final_calls: list[dict[str, Any]] = []
+        with httpx.Client(transport=transport(final_calls)) as client:
+            final = execute(store, next_plan, client)
+        assert len(final_calls) == 53
+        assert project(store.events(final))["collection_complete"]
+
+
+def test_read_only_preview_and_legacy_stop_status(tmp_path: Path) -> None:
+    path = tmp_path / "run.db"
+    with Store(path) as store:
+        m = manifest()
+        data = m.model_dump(mode="json")
+        store.append(
+            "old",
+            "run.created",
+            {
+                "manifest": data,
+                "manifest_hash": digest(data),
+                "inputs": [],
+                "input_hashes": [],
+            },
+        )
+        store.append("old", "run.completed", {"reason": "generation_failed_no_retry"})
+        assert project(store.events("old"))["status"] == "stopped"
+    before = path.read_bytes()
+    with Store(path, read_only=True) as store:
+        assert len(store.events("old")) == 2
+        with pytest.raises(ValueError, match="read-only"):
+            with store.writer():
+                pass
+    assert path.read_bytes() == before
+    result = CliRunner().invoke(
+        app,
+        [
+            "cmto-continue",
+            "old",
+            "--db",
+            str(path),
+            "--max-estimated-usd",
+            "5",
+            "--max-calls",
+            "56",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["network_calls"] == 0
+    assert path.read_bytes() == before

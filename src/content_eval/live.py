@@ -59,7 +59,7 @@ class Verdicts(Frozen):
 class LiveConfig(Frozen):
     provider: Provider
     model: str = Field(min_length=1)
-    timeout_seconds: float = Field(default=30, gt=0, le=60)
+    timeout_seconds: float = Field(default=30, gt=0, le=300)
     max_output_tokens: int = Field(default=1024, ge=128, le=4096)
 
 

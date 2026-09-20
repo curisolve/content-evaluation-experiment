@@ -70,7 +70,9 @@ There are no provider SDK retries or repair calls.
 - At most 56 calls: sixteen generation calls and forty evaluation calls.
   `--max-calls` can lower this cap.
 - Each request has a 100,000-byte serialized-input limit and the configured
-  provider timeout. Generated candidates have a 12,000-byte limit.
+  provider timeout. Generation defaults to 120 seconds, configurable with
+  `--generation-timeout-seconds` (maximum 300); evaluation remains at 30 seconds.
+  Generated candidates have a 12,000-byte limit.
 - Generation and LLM evaluation allow at most 4,096 output tokens per call.
   JEV returns the fixed typed-check set; it has no generative output cap parameter.
 - Before each call, the coordinator checks cumulative known estimated charges
@@ -84,9 +86,11 @@ There are no provider SDK retries or repair calls.
 - `stop_reason` distinguishes pool exhaustion, call/spend guards, invalid output,
   provider failure, and interruption. `collection_complete` distinguishes reaching
   the end of the fixed pool from an early bounded stop; it does not certify quality.
-- There is no wall-clock deadline, concurrency, or paid resume in this slice.
-  Interrupted runs are inspectable/replayable; they are never silently reissued.
-  A new `cmto-run` is a new paid experiment, not a resume.
+- There is no wall-clock deadline or concurrency. Generation-only stops can use
+  [explicit linked continuation](cmto-continuation.md), preserving prepared items
+  and historical costs. Uncertain prior calls require acknowledgement and a
+  positive budget reserve; they are never silently reissued. A new `cmto-run`
+  is a new paid experiment, not a resume.
 
 ## Inspect and replay
 

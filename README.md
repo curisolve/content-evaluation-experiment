@@ -13,6 +13,7 @@ The evaluation must distinguish **rubric passes** from **independently verified 
 - [Run the offline CLI and development checks](docs/development.md)
 - [Configure JEV, Opus 5, and GPT-5.6 API access](docs/providers.md)
 - [Review sources and run the bounded CMTO development collection](docs/cmto-run.md)
+- [Continue a stopped generation run safely](docs/cmto-continuation.md)
 
 - [Engineering design](design.md)
 - [Architecture and flow](docs/architecture.md), with an editable [Excalidraw diagram](docs/architecture.excalidraw)

@@ -9,8 +9,8 @@ from typing import Annotated
 import httpx
 import typer
 
+from content_eval.cmto import continuation_manifest, make_manifest
 from content_eval.cmto import execute as execute_cmto
-from content_eval.cmto import make_manifest
 from content_eval.live import LiveConfig, LiveEvaluator, credential_status, smoke_manifest
 from content_eval.models import Arm, Event, Manifest, canonical, digest
 from content_eval.projection import project
@@ -71,6 +71,7 @@ def cmto_run(
     reviewed_pack_hash: str | None = None,
     max_calls: int = 56,
     threshold: float = 0.9,
+    generation_timeout_seconds: float = 120,
     db: Database = Path("runs/cmto.sqlite"),
     execute: bool = False,
 ) -> None:
@@ -93,6 +94,7 @@ def cmto_run(
             Decimal(max_estimated_usd),
             max_calls=max_calls,
             threshold=threshold,
+            generation_timeout_seconds=generation_timeout_seconds,
         )
         if not execute:
             emit(
@@ -104,6 +106,7 @@ def cmto_run(
                     "jev": "jev-1.13.0",
                     "items": 20,
                     "maximum_calls": max_calls,
+                    "generation_timeout_seconds": generation_timeout_seconds,
                     "estimated_spend_guard_usd": max_estimated_usd,
                     "network_calls": 0,
                     "threshold_status": "provisional_not_calibrated",
@@ -119,6 +122,69 @@ def cmto_run(
         with httpx.Client(trust_env=False, follow_redirects=False) as client, Store(db) as store:
             run_id = execute_cmto(store, manifest, client)
             emit(project(store.events(run_id)))
+    except (ValueError, OSError, KeyError, InvalidOperation) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("cmto-continue")
+def cmto_continue(
+    run_id: RunID,
+    max_estimated_usd: Annotated[str, typer.Option("--max-estimated-usd")],
+    max_calls: Annotated[int, typer.Option("--max-calls")],
+    generation_timeout_seconds: float = 120,
+    acknowledge_uncertain_attempts: bool = False,
+    unknown_cost_reserve_usd: str = "0",
+    db: Database = Path("runs/cmto.sqlite"),
+    execute: bool = False,
+) -> None:
+    """Preview a linked generation continuation; explicit execution may incur new charges."""
+    try:
+        with Store(db, read_only=True) as store:
+            manifest = continuation_manifest(
+                store,
+                run_id,
+                max_estimated_usd=Decimal(max_estimated_usd),
+                max_calls=max_calls,
+                generation_timeout_seconds=generation_timeout_seconds,
+                acknowledge_uncertain_attempts=acknowledge_uncertain_attempts,
+                unknown_cost_reserve_usd=Decimal(unknown_cost_reserve_usd),
+            )
+        carry = manifest.provider_config["continuation"]
+        assert isinstance(carry, dict)
+        prepared = carry["prepared"]
+        assert isinstance(prepared, list)
+        # Paraphrases are paid too; defect variants are not.
+        assignments = manifest.provider_config["slots"]
+        assert isinstance(assignments, list)
+        reused_ids = {item["id"] for item in prepared if isinstance(item, dict)}
+        reused_paid = sum(
+            isinstance(slot, dict) and slot["id"] in reused_ids and slot["kind"] != "defect"
+            for slot in assignments
+        )
+        if not execute:
+            emit(
+                {
+                    "parent_run_id": run_id,
+                    "network_calls": 0,
+                    "reused_candidates": len(prepared),
+                    "prior_calls": carry["prior_calls"],
+                    "prior_known_cost_usd": carry["prior_known_cost_usd"],
+                    "prior_unknown_attempts": carry["prior_unknown_attempts"],
+                    "unknown_cost_reserve_usd": carry["unknown_cost_reserve_usd"],
+                    "maximum_additional_calls_needed": 56 - reused_paid,
+                    "total_call_cap": max_calls,
+                    "total_estimated_spend_guard_usd": max_estimated_usd,
+                    "generation_timeout_seconds": generation_timeout_seconds,
+                    "manifest_hash": digest(manifest.model_dump(mode="json")),
+                    "execution_requires": "--execute; uncertain calls also require "
+                    "--acknowledge-uncertain-attempts and a positive --unknown-cost-reserve-usd",
+                    "warning": "Retries may duplicate billed calls; reserves are not charges.",
+                }
+            )
+            return
+        with Store(db) as store, httpx.Client(trust_env=False, follow_redirects=False) as client:
+            child_id = execute_cmto(store, manifest, client)
+            emit(project(store.events(child_id)))
     except (ValueError, OSError, KeyError, InvalidOperation) as exc:
         raise typer.BadParameter(str(exc)) from exc
 

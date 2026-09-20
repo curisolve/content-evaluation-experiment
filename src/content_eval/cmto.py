@@ -79,6 +79,7 @@ def make_manifest(
     *,
     max_calls: int = MAX_CALLS,
     threshold: float = 0.9,
+    generation_timeout_seconds: float | None = None,
 ) -> Manifest:
     if llm.provider == "jev":
         raise ValueError("the generator/LLM arm must be anthropic or openai")
@@ -94,8 +95,15 @@ def make_manifest(
         raise ValueError("unsupported development allocation")
     if not max_estimated_usd.is_finite() or max_estimated_usd <= 0:
         raise ValueError("a positive finite estimated-spend guard is required")
-    if not 1 <= max_calls <= MAX_CALLS:
-        raise ValueError(f"max_calls must be between 1 and {MAX_CALLS}")
+    if not 1 <= max_calls <= 80:
+        raise ValueError("max_calls must be between 1 and 80")
+    if generation_timeout_seconds is not None:
+        LiveConfig.model_validate(
+            {
+                **llm.model_dump(),
+                "timeout_seconds": generation_timeout_seconds,
+            }
+        )
     if not 0.5 < threshold <= 1:
         raise ValueError("development threshold must be above 0.5 and at most 1")
     jev = LiveConfig(provider="jev", model="jev-1.13.0")
@@ -128,6 +136,11 @@ def make_manifest(
             dict[str, JsonValue],
             {
                 "llm": llm.model_dump(mode="json"),
+                **(
+                    {"generation_timeout_seconds": generation_timeout_seconds}
+                    if generation_timeout_seconds is not None
+                    else {}
+                ),
                 "jev": jev.model_dump(mode="json"),
                 "pack": pack,
                 "slots": slots(),
@@ -191,13 +204,15 @@ class Budget:
                 "generation.failed",
             }
         ]
-        cfg = self.manifest.provider_config
+        cfg = cast(dict[str, Any], self.manifest.provider_config)
+        carry = cfg.get("continuation", {})
+        prior_calls = carry.get("prior_calls", 0)
         reason = None
         if len(started) != len(terminal) or any(
             e.payload.get("cost_usd") is None for e in terminal
         ):
             reason = "unknown_cost_or_interrupted_attempt"
-        elif len(started) >= int(str(cfg["max_calls"])):
+        elif len(started) + prior_calls >= int(str(cfg["max_calls"])):
             reason = "call_cap"
         size = len(canonical(payload).encode())
         if size > MAX_INPUT_BYTES:
@@ -216,7 +231,11 @@ class Budget:
             ),
             Decimal(0),
         )
-        if reason is None and spent + reserve > Decimal(str(cfg["max_estimated_usd"])):
+        spent += Decimal(carry.get("prior_known_cost_usd", "0"))
+        unknown_reserve = Decimal(carry.get("unknown_cost_reserve_usd", "0"))
+        if reason is None and spent + unknown_reserve + reserve > Decimal(
+            str(cfg["max_estimated_usd"])
+        ):
             reason = "estimated_spend_guard"
         self.store.append(
             self.run_id,
@@ -226,7 +245,8 @@ class Budget:
                 "reason": reason,
                 "spent_estimate_usd": str(spent),
                 "next_reserve_estimate_usd": str(reserve),
-                "calls_started": len(started),
+                "calls_started": len(started) + prior_calls,
+                "unknown_cost_reserve_usd": str(unknown_reserve),
                 "request_hash": digest(payload),
             },
         )
@@ -255,9 +275,13 @@ def _generate_pool(
     budget: Budget,
 ) -> None:
     cfg = cast(dict[str, Any], manifest.provider_config)
-    generated: dict[str, dict[str, Any]] = {}
+    generated: dict[str, dict[str, Any]] = {
+        item["id"]: item for item in cfg.get("continuation", {}).get("prepared", [])
+    }
     for slot in cfg["slots"]:
         cid = slot["id"]
+        if cid in generated:
+            continue
         parent = generated.get(slot["parent"])
         if slot["kind"] == "defect":
             if parent is None:
@@ -411,7 +435,14 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         Decimal(cfg["max_estimated_usd"]),
         max_calls=cfg["max_calls"],
         threshold=manifest.policy.threshold,
+        generation_timeout_seconds=cfg.get("generation_timeout_seconds"),
     )
+    if "continuation" in cfg:
+        expected = expected.model_copy(
+            update={
+                "provider_config": {**expected.provider_config, "continuation": cfg["continuation"]}
+            }
+        )
     if manifest != expected:
         raise ValueError("manifest differs from the supported frozen development configuration")
     # Require both credentials before creating a run or charging for generation.
@@ -427,8 +458,16 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         )
         for arm in ("llm", "jev")
     }
-    generator = LiveEvaluator(llm, client, max_input_bytes=MAX_INPUT_BYTES)
+    generator_config = LiveConfig.model_validate(
+        {
+            **llm.model_dump(),
+            "timeout_seconds": cfg.get("generation_timeout_seconds", llm.timeout_seconds),
+        }
+    )
+    generator = LiveEvaluator(generator_config, client, max_input_bytes=MAX_INPUT_BYTES)
     with store.writer():
+        if "continuation" in cfg:
+            validate_continuation(store, manifest)
         run_id = str(uuid4())
         data = manifest.model_dump(mode="json")
         store.append(
@@ -457,5 +496,114 @@ def execute(store: Store, manifest: Manifest, client: httpx.Client) -> str:
         except Exception as exc:
             store.append(run_id, "run.failed", {"reason": type(exc).__name__})
             raise
-        store.append(run_id, "run.completed", {"reason": reason})
+        store.append(
+            run_id,
+            "run.completed" if reason == "fixed_pool_exhausted" else "run.stopped",
+            {"reason": reason},
+        )
         return run_id
+
+
+def continuation_manifest(
+    store: Store,
+    parent_id: str,
+    *,
+    max_estimated_usd: Decimal,
+    max_calls: int,
+    generation_timeout_seconds: float,
+    acknowledge_uncertain_attempts: bool = False,
+    unknown_cost_reserve_usd: Decimal = Decimal(0),
+) -> Manifest:
+    from content_eval.projection import project
+
+    events = store.events(parent_id)
+    report = project(events)
+    old = Manifest.model_validate(events[0].payload["manifest"])
+    if old.mode != "cmto-development" or report["status"] not in {"stopped", "cancelled", "failed"}:
+        raise ValueError("continuation requires a stopped/cancelled/failed CMTO generation run")
+    if any(e.event_type == "pool.frozen" or e.arm is not None for e in events):
+        raise ValueError("this continuation supports generation stops only, not evaluation resume")
+    if any(e.event_type == "candidate.invalid" for e in events):
+        raise ValueError("invalid content is not automatically regenerated or repaired")
+    cfg = cast(dict[str, Any], old.provider_config)
+    inherited = cfg.get("continuation", {})
+    prepared = {item["id"]: item for item in inherited.get("prepared", [])}
+    for event in events:
+        if event.event_type == "candidate.prepared":
+            item = event.payload["candidate"]
+            if digest(item) != event.payload["input_hash"]:
+                raise ValueError("prepared candidate hash mismatch")
+            candidate = Candidate.model_validate(item)
+            validate_candidate(candidate, old)
+            if candidate.id in prepared:
+                raise ValueError("duplicate prepared candidate")
+            prepared[candidate.id] = candidate.model_dump(mode="json")
+    # Do not repeat a successful response that was received but not yet prepared.
+    for event in events:
+        if event.event_type == "generation.succeeded" and event.candidate_id not in prepared:
+            raise ValueError(
+                "successful unprepared response needs local recovery, not a paid retry"
+            )
+    starts = [e for e in events if e.event_type == "generation.started"]
+    terminals = [e for e in events if e.event_type in {"generation.succeeded", "generation.failed"}]
+    unknown = (
+        inherited.get("prior_unknown_attempts", 0)
+        + sum(e.payload.get("cost_usd") is None for e in terminals)
+        + len(report["outstanding_attempts"])
+    )
+    if not unknown_cost_reserve_usd.is_finite() or unknown_cost_reserve_usd < 0:
+        raise ValueError("unknown-cost reserve must be finite and nonnegative")
+    result = make_manifest(
+        cfg["pack"],
+        LiveConfig.model_validate(cfg["llm"]),
+        max_estimated_usd,
+        max_calls=max_calls,
+        threshold=old.policy.threshold,
+        generation_timeout_seconds=generation_timeout_seconds,
+    )
+    carry = {
+        "parent_run_id": parent_id,
+        "parent_event_hash": events[-1].event_hash,
+        "parent_manifest_hash": events[0].payload["manifest_hash"],
+        "prior_calls": inherited.get("prior_calls", 0) + len(starts),
+        "prior_known_cost_usd": report["experiment_estimated_cost_usd"],
+        "prior_unknown_attempts": unknown,
+        "unknown_cost_reserve_usd": str(unknown_cost_reserve_usd),
+        "acknowledge_uncertain_attempts": acknowledge_uncertain_attempts,
+        "prepared": [prepared[s["id"]] for s in cfg["slots"] if s["id"] in prepared],
+    }
+    return result.model_copy(
+        update={
+            "provider_config": {**result.provider_config, "continuation": cast(JsonValue, carry)},
+        }
+    )
+
+
+def validate_continuation(store: Store, manifest: Manifest) -> None:
+    cfg = cast(dict[str, Any], manifest.provider_config)
+    carry = cfg["continuation"]
+    reserve = Decimal(carry["unknown_cost_reserve_usd"])
+    if carry["prior_unknown_attempts"] and (
+        not carry["acknowledge_uncertain_attempts"] or reserve <= 0
+    ):
+        raise ValueError(
+            "uncertain prior calls require --acknowledge-uncertain-attempts "
+            "and a positive --unknown-cost-reserve-usd; prior billing stays unknown"
+        )
+    rebuilt = continuation_manifest(
+        store,
+        carry["parent_run_id"],
+        max_estimated_usd=Decimal(cfg["max_estimated_usd"]),
+        max_calls=cfg["max_calls"],
+        generation_timeout_seconds=cfg["generation_timeout_seconds"],
+        acknowledge_uncertain_attempts=carry["acknowledge_uncertain_attempts"],
+        unknown_cost_reserve_usd=reserve,
+    )
+    if rebuilt != manifest:
+        raise ValueError("continuation differs from the verified parent journal")
+    for row in store.db.execute("SELECT body FROM events WHERE sequence=1"):
+        import json
+
+        child = json.loads(row[0])["payload"]["manifest"]["provider_config"].get("continuation")
+        if child and child["parent_run_id"] == carry["parent_run_id"]:
+            raise ValueError("parent already has a continuation; inspect/continue that child run")

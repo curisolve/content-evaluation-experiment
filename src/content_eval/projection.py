@@ -96,7 +96,7 @@ def project(events: list[Event]) -> dict[str, Any]:
             report["valid"] += 1
         elif event.event_type == "candidate.invalid":
             report["invalid"] += 1
-        elif event.event_type in {"run.completed", "run.cancelled", "run.failed"}:
+        elif event.event_type in {"run.completed", "run.cancelled", "run.failed", "run.stopped"}:
             report["status"] = event.event_type.split(".")[1]
             report["stop_reason"] = p.get("reason")
         elif event.event_type == "run.resumed":
@@ -207,6 +207,8 @@ def project(events: list[Event]) -> dict[str, Any]:
         stats["target_reached"] = count >= manifest.target
         stats["target_gap"] = max(0, manifest.target - count)
     if manifest.mode == "cmto-development":
+        if report["status"] == "completed" and report.get("stop_reason") != "fixed_pool_exhausted":
+            report["status"] = "stopped"
         report["collection_complete"] = report.get("stop_reason") == "fixed_pool_exhausted"
         cfg = manifest.provider_config
         assignments = cfg.get("slots", [])
@@ -253,4 +255,23 @@ def project(events: list[Event]) -> dict[str, Any]:
             "All-item ratios mix ordinary/challenge populations and are not operational yield. "
             "Admission spend guard is estimated, not a provider billing limit."
         )
+        continuation = manifest.provider_config.get("continuation")
+        if isinstance(continuation, dict):
+            report["continuation"] = {
+                key: value for key, value in continuation.items() if key != "prepared"
+            }
+            prepared_items = continuation.get("prepared")
+            report["reused_candidates"] = (
+                len(prepared_items) if isinstance(prepared_items, list) else 0
+            )
+            report["experiment_estimated_cost_usd"] = str(
+                Decimal(report["experiment_estimated_cost_usd"])
+                + Decimal(str(continuation["prior_known_cost_usd"]))
+            )
+            if continuation["prior_unknown_attempts"]:
+                report["experiment_cost_complete"] = False
+            report["cost_note"] += (
+                " Continuation total includes prior known charges. Unknown-call reserves are "
+                "budget allowances, not costs; prior unknown charges remain unknown."
+            )
     return report

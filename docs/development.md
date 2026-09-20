@@ -9,7 +9,8 @@ Use a development worktree, not the synchronized `worksync` checkout.
 The [CMTO development collector](cmto-run.md) adds source-grounded generation and
 evaluation with explicit execution, call/spend admission guards, and separate
 generator accounting. Its interruption behavior is intentionally different:
-inspection/replay only, no paid resume yet.
+generation stops support [explicit linked continuation](cmto-continuation.md);
+evaluation resume remains unavailable.
 
 ## Setup and run
 
